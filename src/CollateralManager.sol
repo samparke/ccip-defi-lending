@@ -3,19 +3,33 @@ pragma solidity ^0.8.24;
 
 import {IERC20} from "@openzeppelin/contracts/token/ERC20/IERC20.sol";
 import {AggregatorV3Interface} from "@chainlink/contracts/src/v0.8/interfaces/AggregatorV3Interface.sol";
+import {Client} from "@ccip/contracts/src/v0.8/ccip/libraries/Client.sol";
+import {CCIPReceiver} from "@ccip/contracts/src/v0.8/ccip/applications/CCIPReceiver.sol";
+import {IRouterClient} from "@ccip/contracts/src/v0.8/ccip/interfaces/IRouterClient.sol";
 
-contract CollateralManager {
+contract CollateralManager is CCIPReceiver {
     error CollateralManager__DepositFailed(address user);
     error CollateralManager__MustBeMoreThanZero();
     error CollateralManager__CannotRedeemMoreThanDeposited();
+    error CollateralManager__InvalidReceiver();
+    error CollateralManager__InsufficientLinkBalance();
 
     event Deposit(address indexed user, uint256 amount);
     event Redeem(address indexed redeemedFor, address indexed redeemedBy, uint256 amount);
+    event MessageSent(
+        bytes32 indexed messageId,
+        uint64 indexed destinationChainSelector,
+        address receiver,
+        string text,
+        address feeToken,
+        uint256 fees
+    );
 
     mapping(address user => uint256 deposited) private s_amountDeposited;
 
     uint256 public constant ADDITIONAL_PRECISION = 1e10;
     uint256 public constant PRECISION = 1e18;
+    IERC20 private s_linkToken;
 
     modifier moreThanZero(uint256 amount) {
         if (amount == 0) {
@@ -25,7 +39,16 @@ contract CollateralManager {
         _;
     }
 
-    constructor() {}
+    modifier validateReceiver(address _receiver) {
+        if (_receiver == address(0)) {
+            revert CollateralManager__InvalidReceiver();
+        }
+        _;
+    }
+
+    constructor(address _router, address _link) CCIPReceiver(_router) {
+        s_linkToken = IERC20(_link);
+    }
 
     /**
      * @notice this function allows the user to deposit collateral in weth
@@ -75,10 +98,6 @@ contract CollateralManager {
         emit Redeem(_user, msg.sender, _amount);
     }
 
-    function requestTokenOnSecondChain(address _tokenCollateralAddress, address _user) public {
-        uint256 amountTokenToMint = calculateCollateralValue(_tokenCollateralAddress, getAmountDeposited(_user));
-    }
-
     // weth price calculation
 
     /**
@@ -102,6 +121,45 @@ contract CollateralManager {
         // we then multiply by _amount (which is also 18 decimals), giving us the price for the amount in 36 decimals
         // we then divide by 18 decimals to bring it back down to 18 decimals
         return (ethPrice * _amount) / PRECISION;
+    }
+
+    // sending the request
+
+    function requestTokenOnSecondChain(address _tokenCollateralAddress) public {
+        uint256 amountTokenToMint = calculateCollateralValue(_tokenCollateralAddress, getAmountDeposited(msg.sender));
+    }
+
+    function sendMessage(uint64 _destinationChainSelector, address _receiver, string calldata _text)
+        public
+        returns (bytes32 messageId)
+    {
+        Client.EVM2AnyMessage memory message = _buildCCIPMessage(_receiver, _text, address(s_linkToken));
+        IRouterClient router = IRouterClient(this.getRouter());
+        uint256 fee = IRouterClient(router).getFee(_destinationChainSelector, message);
+
+        if (fee > s_linkToken.balanceOf(address(this))) {
+            revert CollateralManager__InsufficientLinkBalance();
+        }
+
+        messageId = router.ccipSend(_destinationChainSelector, message);
+        emit MessageSent(messageId, _destinationChainSelector, _receiver, _text, address(s_linkToken), fee);
+        return messageId;
+    }
+
+    function _buildCCIPMessage(address _receiver, string calldata _text, address _feeTokenAddress)
+        private
+        pure
+        returns (Client.EVM2AnyMessage memory)
+    {
+        return (
+            Client.EVM2AnyMessage({
+                receiver: abi.encode(_receiver),
+                data: abi.encode(_text),
+                tokenAmounts: new Client.EVMTokenAmount[](0),
+                feeToken: _feeTokenAddress,
+                extraArgs: ""
+            })
+        );
     }
 
     // getter functions
