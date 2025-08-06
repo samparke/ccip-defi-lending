@@ -75,21 +75,33 @@ contract CollateralManager {
         emit Redeem(_user, msg.sender, _amount);
     }
 
-    function requestToken() public {}
+    function requestTokenOnSecondChain(address _tokenCollateralAddress, address _user) public {
+        uint256 amountTokenToMint = calculateCollateralValue(_tokenCollateralAddress, getAmountDeposited(_user));
+    }
 
     // weth price calculation
 
-    function _fetchCollateralPriceForAmount(address _tokenCollateralAddress, uint256 _amount)
-        internal
-        view
-        returns (uint256)
-    {
+    /**
+     * @notice this function fetches the current price for a token
+     * @param _tokenCollateralAddress the token collateral we want to retreive the price for
+     */
+    function _fetchCollateralPrice(address _tokenCollateralAddress) internal view returns (uint256) {
         AggregatorV3Interface priceFeed = AggregatorV3Interface(_tokenCollateralAddress);
         (, int256 price,,,) = priceFeed.latestRoundData();
         // as chainlink returns an 8 decimal value, we scale up to 18 decimals
+        return uint256(price) * ADDITIONAL_PRECISION;
+    }
+
+    /**
+     * @notice this functions calculates the collateral value for the amount requested
+     * @param _tokenCollateralAddress the token collateral address
+     * @param _amount the amount we want to get the price for
+     */
+    function calculateCollateralValue(address _tokenCollateralAddress, uint256 _amount) public view returns (uint256) {
+        uint256 ethPrice = _fetchCollateralPrice(_tokenCollateralAddress);
         // we then multiply by _amount (which is also 18 decimals), giving us the price for the amount in 36 decimals
         // we then divide by 18 decimals to bring it back down to 18 decimals
-        return ((uint256(price) * ADDITIONAL_PRECISION) * _amount) / PRECISION;
+        return (ethPrice * _amount) / PRECISION;
     }
 
     // getter functions
