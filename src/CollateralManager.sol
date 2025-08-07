@@ -49,6 +49,10 @@ contract CollateralManager is CCIPReceiver, Ownable {
         _;
     }
 
+    /**
+     * @notice this functions ensures the receiver we are attempting to send a message to is valid
+     * @param _receiver the receiver we are attempting to send the data to on the secondary chain
+     */
     modifier validateReceiver(address _receiver) {
         if (_receiver == address(0)) {
             revert CollateralManager__InvalidReceiver();
@@ -56,6 +60,10 @@ contract CollateralManager is CCIPReceiver, Ownable {
         _;
     }
 
+    /**
+     * @notice this function checks the destination chain we are attempting to send data to is accepted
+     * @param _destinationChainSelector the destination chain we are trying to pass data to
+     */
     modifier onlyAllowListedDestinationChain(uint64 _destinationChainSelector) {
         if (!s_allowListedDestinationChains[_destinationChainSelector]) {
             revert CollateralManager__DestinationChainNotAllowListed();
@@ -63,6 +71,11 @@ contract CollateralManager is CCIPReceiver, Ownable {
         _;
     }
 
+    /**
+     * @notice this function checks: the sourceChainSelector the sender entered was ours or acceptable, and the _sender is accepted
+     * @param _sourceChainSelector when receiving a message, it checks the sourceChainSelector the user on the other chain entered was ours or accepted
+     * @param _sender checking the sender who sent the message on the secondary chain is accepted
+     */
     modifier onlyAllowListed(uint64 _sourceChainSelector, address _sender) {
         if (!s_allowListedSourceChains[_sourceChainSelector]) {
             revert CollateralManager__SourceChainNotAllowedList();
@@ -166,8 +179,13 @@ contract CollateralManager is CCIPReceiver, Ownable {
 
     // sending the request
 
-    function requestTokenOnSecondChain(address _tokenCollateralAddress) public {
+    function requestTokenOnSecondChain(
+        address _tokenCollateralAddress,
+        uint64 _destinationChainSelector,
+        address _receiver
+    ) public {
         uint256 amountTokenToMint = calculateCollateralValue(_tokenCollateralAddress, getAmountDeposited(msg.sender));
+        // sendMessage(_destinationChainSelector, _receiver, );
     }
 
     /**
