@@ -26,11 +26,13 @@ contract CollateralManager is CCIPReceiver, Ownable {
         bytes32 indexed messageId,
         uint64 indexed destinationChainSelector,
         address receiver,
-        bytes data,
+        uint256 amountStablecoinMint,
         address feeToken,
         uint256 fees
     );
-    event MessageReceived(bytes32 indexed messageId, uint64 indexed sourceChainSelector, address sender, bytes data);
+    event MessageReceived(
+        bytes32 indexed messageId, uint64 indexed sourceChainSelector, address sender, uint256 amountStablecoinBurned
+    );
 
     mapping(address user => uint256 deposited) private s_amountDeposited;
     mapping(uint64 => bool) public s_allowListedDestinationChains;
@@ -41,7 +43,7 @@ contract CollateralManager is CCIPReceiver, Ownable {
     uint256 public constant PRECISION = 1e18;
     IERC20 private s_linkToken;
     bytes32 private s_lastReceivedMessageId;
-    bytes private s_lastReceivedData;
+    uint256 private s_lastReceivedData;
 
     modifier moreThanZero(uint256 amount) {
         if (amount == 0) {
@@ -200,8 +202,7 @@ contract CollateralManager is CCIPReceiver, Ownable {
         uint256 amountDeposited = getAmountDeposited(msg.sender);
         s_amountDeposited[msg.sender] -= amountDeposited;
         uint256 amountTokenToMint = calculateCollateralValue(_tokenCollateralAddress, amountDeposited);
-        bytes memory bytesAmount = abi.encode(amountTokenToMint);
-        sendMessage(_destinationChainSelector, _receiver, bytesAmount);
+        sendMessage(_destinationChainSelector, _receiver, amountTokenToMint);
     }
 
     /**
@@ -223,23 +224,22 @@ contract CollateralManager is CCIPReceiver, Ownable {
         uint256 amountDepositedAfterConvert = getAmountDeposited(msg.sender) - _amount;
         s_amountDeposited[msg.sender] -= amountDepositedAfterConvert;
         uint256 amountTokenToMint = calculateCollateralValue(_tokenCollateralAddress, _amount);
-        bytes memory bytesAmount = abi.encode(amountTokenToMint);
-        sendMessage(_destinationChainSelector, _receiver, bytesAmount);
+        sendMessage(_destinationChainSelector, _receiver, amountTokenToMint);
     }
 
     /**
      *
      * @param _destinationChainSelector the destination chain we are sending the message to
      * @param _receiver the recipient address of the message
-     * @param _data this is the data we are sending, telling the secondary chain how much stablecoin to mint
+     * @param _amountTokenToMint this is the data we are sending, telling the secondary chain how much stablecoin to mint
      */
-    function sendMessage(uint64 _destinationChainSelector, address _receiver, bytes memory _data)
+    function sendMessage(uint64 _destinationChainSelector, address _receiver, uint256 _amountTokenToMint)
         public
         onlyAllowListedDestinationChain(_destinationChainSelector)
         validateReceiver(_receiver)
         returns (bytes32 messageId)
     {
-        Client.EVM2AnyMessage memory message = _buildCCIPMessage(_receiver, _data, address(s_linkToken));
+        Client.EVM2AnyMessage memory message = _buildCCIPMessage(_receiver, _amountTokenToMint, address(s_linkToken));
         IRouterClient router = IRouterClient(this.getRouter());
         uint256 fee = IRouterClient(router).getFee(_destinationChainSelector, message);
 
@@ -248,17 +248,17 @@ contract CollateralManager is CCIPReceiver, Ownable {
         }
 
         messageId = router.ccipSend(_destinationChainSelector, message);
-        emit MessageSent(messageId, _destinationChainSelector, _receiver, _data, address(s_linkToken), fee);
+        emit MessageSent(messageId, _destinationChainSelector, _receiver, _amountTokenToMint, address(s_linkToken), fee);
         return messageId;
     }
 
     /**
      * @notice this function allows us to construct a message, which will be called when we want to send the message to the secondary chain
      * @param _receiver is the recipient address of the message
-     * @param _data this is the data we are sending, telling the secondary chain how much stablecoin to mint
+     * @param _amountTokenToMint this is the data we are sending, telling the secondary chain how much stablecoin to mint
      * @param _feeTokenAddress the LINK token address
      */
-    function _buildCCIPMessage(address _receiver, bytes memory _data, address _feeTokenAddress)
+    function _buildCCIPMessage(address _receiver, uint256 _amountTokenToMint, address _feeTokenAddress)
         private
         pure
         returns (Client.EVM2AnyMessage memory)
@@ -266,7 +266,7 @@ contract CollateralManager is CCIPReceiver, Ownable {
         return (
             Client.EVM2AnyMessage({
                 receiver: abi.encode(_receiver),
-                data: _data,
+                data: abi.encode(_amountTokenToMint),
                 tokenAmounts: new Client.EVMTokenAmount[](0),
                 feeToken: _feeTokenAddress,
                 extraArgs: ""
@@ -286,10 +286,13 @@ contract CollateralManager is CCIPReceiver, Ownable {
         onlyAllowListed(message.sourceChainSelector, abi.decode(message.sender, (address)))
     {
         s_lastReceivedMessageId = message.messageId;
-        s_lastReceivedData = message.data;
+        s_lastReceivedData = abi.decode(message.data, (uint256));
 
         emit MessageReceived(
-            message.messageId, message.sourceChainSelector, abi.decode(message.sender, (address)), message.data
+            message.messageId,
+            message.sourceChainSelector,
+            abi.decode(message.sender, (address)),
+            abi.decode(message.data, (uint256))
         );
     }
 
@@ -298,7 +301,7 @@ contract CollateralManager is CCIPReceiver, Ownable {
         return s_amountDeposited[_user];
     }
 
-    function getLastReceivedMessageDetails() public view returns (bytes32 messageId, bytes memory data) {
+    function getLastReceivedMessageDetails() public view returns (bytes32 messageId, uint256 amountStablecoinBurned) {
         return (s_lastReceivedMessageId, s_lastReceivedData);
     }
 }
