@@ -6,13 +6,17 @@ import {AggregatorV3Interface} from "@chainlink/contracts/src/v0.8/interfaces/Ag
 import {Client} from "@ccip/contracts/src/v0.8/ccip/libraries/Client.sol";
 import {CCIPReceiver} from "@ccip/contracts/src/v0.8/ccip/applications/CCIPReceiver.sol";
 import {IRouterClient} from "@ccip/contracts/src/v0.8/ccip/interfaces/IRouterClient.sol";
+import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 
-contract CollateralManager is CCIPReceiver {
+contract CollateralManager is CCIPReceiver, Ownable {
     error CollateralManager__DepositFailed(address user);
     error CollateralManager__MustBeMoreThanZero();
     error CollateralManager__CannotRedeemMoreThanDeposited();
     error CollateralManager__InvalidReceiver();
     error CollateralManager__InsufficientLinkBalance();
+    error CollateralManager__DestinationChainNotAllowListed();
+    error CollateralManager__SourceChainNotAllowedList();
+    error CollateralManager__SenderNotAllowedList();
 
     event Deposit(address indexed user, uint256 amount);
     event Redeem(address indexed redeemedFor, address indexed redeemedBy, uint256 amount);
@@ -24,12 +28,18 @@ contract CollateralManager is CCIPReceiver {
         address feeToken,
         uint256 fees
     );
+    event MessageReceived(bytes32 indexed messageId, uint64 indexed sourceChainSelector, address sender, string text);
 
     mapping(address user => uint256 deposited) private s_amountDeposited;
+    mapping(uint64 => bool) public s_allowListedDestinationChains;
+    mapping(uint64 => bool) public s_allowListedSourceChains;
+    mapping(address => bool) public s_allowListedSenders;
 
     uint256 public constant ADDITIONAL_PRECISION = 1e10;
     uint256 public constant PRECISION = 1e18;
     IERC20 private s_linkToken;
+    bytes32 private s_lastReceivedMessageId;
+    string private s_lastReceivedText;
 
     modifier moreThanZero(uint256 amount) {
         if (amount == 0) {
@@ -46,8 +56,39 @@ contract CollateralManager is CCIPReceiver {
         _;
     }
 
-    constructor(address _router, address _link) CCIPReceiver(_router) {
+    modifier onlyAllowListedDestinationChain(uint64 _destinationChainSelector) {
+        if (!s_allowListedDestinationChains[_destinationChainSelector]) {
+            revert CollateralManager__DestinationChainNotAllowListed();
+        }
+        _;
+    }
+
+    modifier onlyAllowListed(uint64 _sourceChainSelector, address _sender) {
+        if (!s_allowListedSourceChains[_sourceChainSelector]) {
+            revert CollateralManager__SourceChainNotAllowedList();
+        }
+        if (!s_allowListedSenders[_sender]) {
+            revert CollateralManager__SenderNotAllowedList();
+        }
+        _;
+    }
+
+    constructor(address _router, address _link) CCIPReceiver(_router) Ownable(msg.sender) {
         s_linkToken = IERC20(_link);
+    }
+
+    // allowing source, destination and sender
+
+    function allowDestinationChain(uint64 _destinationChainSelector, bool _allowed) external onlyOwner {
+        s_allowListedDestinationChains[_destinationChainSelector] = _allowed;
+    }
+
+    function allowSourceChain(uint64 _sourceChainSelector, bool _allowed) external onlyOwner {
+        s_allowListedSourceChains[_sourceChainSelector] = _allowed;
+    }
+
+    function allowSender(address _sender, bool _allowed) external onlyOwner {
+        s_allowListedSenders[_sender] = _allowed;
     }
 
     /**
@@ -129,8 +170,16 @@ contract CollateralManager is CCIPReceiver {
         uint256 amountTokenToMint = calculateCollateralValue(_tokenCollateralAddress, getAmountDeposited(msg.sender));
     }
 
+    /**
+     *
+     * @param _destinationChainSelector the destination chain we are sending the message to
+     * @param _receiver the recipient address of the message
+     * @param _text this is the text we are sending, telling the secondary chain how much stablecoin to mint
+     */
     function sendMessage(uint64 _destinationChainSelector, address _receiver, string calldata _text)
         public
+        onlyAllowListedDestinationChain(_destinationChainSelector)
+        validateReceiver(_receiver)
         returns (bytes32 messageId)
     {
         Client.EVM2AnyMessage memory message = _buildCCIPMessage(_receiver, _text, address(s_linkToken));
@@ -146,6 +195,12 @@ contract CollateralManager is CCIPReceiver {
         return messageId;
     }
 
+    /**
+     * @notice this function allows us to construct a message, which will be called when we want to send the message to the secondary chain
+     * @param _receiver is the recipient address of the message
+     * @param _text this is the text we are sending, telling the secondary chain how much stablecoin to mint
+     * @param _feeTokenAddress the LINK token address
+     */
     function _buildCCIPMessage(address _receiver, string calldata _text, address _feeTokenAddress)
         private
         pure
@@ -162,8 +217,34 @@ contract CollateralManager is CCIPReceiver {
         );
     }
 
+    /**
+     * @notice this function can accept messages from secondary chains
+     * @param message the message sent by the secondary chain
+     * @dev this will be called by the ccipReceive function when a user on the secondary chain called ccipSend
+     * the message will pass through this function, allowing the contract to receive the message (if the sender and sourceChainSelector is allowed)
+     */
+    function _ccipReceive(Client.Any2EVMMessage memory message)
+        internal
+        override
+        onlyAllowListed(message.sourceChainSelector, abi.decode(message.sender, (address)))
+    {
+        s_lastReceivedMessageId = message.messageId;
+        s_lastReceivedText = abi.decode(message.data, (string));
+
+        emit MessageReceived(
+            message.messageId,
+            message.sourceChainSelector,
+            abi.decode(message.sender, (address)),
+            abi.decode(message.data, (string))
+        );
+    }
+
     // getter functions
     function getAmountDeposited(address _user) public view returns (uint256) {
         return s_amountDeposited[_user];
+    }
+
+    function getLastReceivedMessageDetails() public view returns (bytes32 messageId, string memory text) {
+        return (s_lastReceivedMessageId, s_lastReceivedText);
     }
 }
