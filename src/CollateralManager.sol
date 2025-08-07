@@ -44,6 +44,8 @@ contract CollateralManager is CCIPReceiver, Ownable {
     IERC20 private s_linkToken;
     bytes32 private s_lastReceivedMessageId;
     uint256 private s_lastReceivedData;
+    address private wethAddress;
+    address private wethPriceFeedAddress;
 
     modifier moreThanZero(uint256 amount) {
         if (amount == 0) {
@@ -90,7 +92,12 @@ contract CollateralManager is CCIPReceiver, Ownable {
         _;
     }
 
-    constructor(address _router, address _link) CCIPReceiver(_router) Ownable(msg.sender) {
+    constructor(address _wethAddress, address _wethPriceFeed, address _router, address _link)
+        CCIPReceiver(_router)
+        Ownable(msg.sender)
+    {
+        wethAddress = _wethAddress;
+        wethPriceFeedAddress = wethPriceFeedAddress;
         s_linkToken = IERC20(_link);
     }
 
@@ -110,54 +117,50 @@ contract CollateralManager is CCIPReceiver, Ownable {
 
     /**
      * @notice this function allows the user to deposit collateral in weth
-     * @param _tokenCollateralAddress the collateral token address. for this protocol, we are only using weth
      * @param _amount the amount they want to deposit
      */
-    function deposit(address _tokenCollateralAddress, uint256 _amount) public moreThanZero(_amount) {
+    function deposit(uint256 _amount) public moreThanZero(_amount) {
         s_amountDeposited[msg.sender] += _amount;
         // this will be transfering the users weth to this contract as collateral
-        bool success = IERC20(_tokenCollateralAddress).transferFrom(msg.sender, address(this), _amount);
+        bool success = IERC20(wethAddress).transferFrom(msg.sender, address(this), _amount);
         if (!success) {
             revert CollateralManager__DepositFailed(msg.sender);
         }
         emit Deposit(msg.sender, _amount);
     }
 
-    function depositAndRequestToken(
-        address _tokenCollateralAddress,
-        uint256 _amount,
-        uint64 _destinationChainSelector,
-        address _receiver
-    ) external moreThanZero(_amount) {
+    function depositAndRequestToken(uint256 _amount, uint64 _destinationChainSelector, address _receiver)
+        external
+        moreThanZero(_amount)
+    {
         s_amountDeposited[msg.sender] += _amount;
-        bool success = IERC20(_tokenCollateralAddress).transferFrom(msg.sender, address(this), _amount);
+        bool success = IERC20(wethAddress).transferFrom(msg.sender, address(this), _amount);
         if (!success) {
             revert CollateralManager__DepositFailed(msg.sender);
         }
         emit Deposit(msg.sender, _amount);
-        requestTokensOnSecondChain(_tokenCollateralAddress, _destinationChainSelector, _receiver, _amount);
+        requestTokensOnSecondChain(_destinationChainSelector, _receiver, _amount);
     }
 
     /**
      * @notice this function is for the user to redeem the collateral they have deposited
-     * @param _tokenCollateralAddress the collateral token to redeem
      * @param _amount the amount to redeem
      */
-    function redeem(address _tokenCollateralAddress, uint256 _amount) public moreThanZero(_amount) {
+    function redeem(uint256 _amount) public moreThanZero(_amount) {
         if (s_amountDeposited[msg.sender] < _amount) {
             revert CollateralManager__CannotRedeemMoreThanDeposited();
         }
         s_amountDeposited[msg.sender] -= _amount;
-        IERC20(_tokenCollateralAddress).transfer(msg.sender, _amount);
+        IERC20(wethAddress).transfer(msg.sender, _amount);
         emit Redeem(msg.sender, msg.sender, _amount);
     }
 
-    function redeemForUser(address _tokenCollateralAddress, address _user, uint256 _amount) external {
+    function redeemForUser(address _user, uint256 _amount) external {
         if (s_amountDeposited[msg.sender] < _amount) {
             revert CollateralManager__CannotRedeemMoreThanDeposited();
         }
         s_amountDeposited[_user] -= _amount;
-        IERC20(_tokenCollateralAddress).transferFrom(address(this), _user, _amount);
+        IERC20(wethAddress).transferFrom(address(this), _user, _amount);
         emit Redeem(_user, msg.sender, _amount);
     }
 
@@ -165,10 +168,9 @@ contract CollateralManager is CCIPReceiver, Ownable {
 
     /**
      * @notice this function fetches the current price for a token
-     * @param _tokenCollateralAddress the token collateral we want to retreive the price for
      */
-    function _fetchCollateralPrice(address _tokenCollateralAddress) internal view returns (uint256) {
-        AggregatorV3Interface priceFeed = AggregatorV3Interface(_tokenCollateralAddress);
+    function _fetchCollateralPrice() internal view returns (uint256) {
+        AggregatorV3Interface priceFeed = AggregatorV3Interface(wethPriceFeedAddress);
         (, int256 price,,,) = priceFeed.latestRoundData();
         // as chainlink returns an 8 decimal value, we scale up to 18 decimals
         return uint256(price) * ADDITIONAL_PRECISION;
@@ -176,11 +178,10 @@ contract CollateralManager is CCIPReceiver, Ownable {
 
     /**
      * @notice this functions calculates the collateral value for the amount requested
-     * @param _tokenCollateralAddress the token collateral address
      * @param _amount the amount we want to get the price for
      */
-    function calculateCollateralValue(address _tokenCollateralAddress, uint256 _amount) public view returns (uint256) {
-        uint256 ethPrice = _fetchCollateralPrice(_tokenCollateralAddress);
+    function calculateCollateralValue(uint256 _amount) public view returns (uint256) {
+        uint256 ethPrice = _fetchCollateralPrice();
         // we then multiply by _amount (which is also 18 decimals), giving us the price for the amount in 36 decimals
         // we then divide by 18 decimals to bring it back down to 18 decimals
         return (ethPrice * _amount) / PRECISION;
@@ -190,40 +191,29 @@ contract CollateralManager is CCIPReceiver, Ownable {
 
     /**
      * @notice this function is called by the user when they want to convert all their deposited collateral into tokens on the secondary chain
-     * @param _tokenCollateralAddress the weth address
      * @param _destinationChainSelector the destination chain we are sending data to
      * @param _receiver the recevier address on the secondary chain
      */
-    function requestAllTokenOnSecondChain(
-        address _tokenCollateralAddress,
-        uint64 _destinationChainSelector,
-        address _receiver
-    ) public {
+    function requestAllTokenOnSecondChain(uint64 _destinationChainSelector, address _receiver) public {
         uint256 amountDeposited = getAmountDeposited(msg.sender);
         s_amountDeposited[msg.sender] -= amountDeposited;
-        uint256 amountTokenToMint = calculateCollateralValue(_tokenCollateralAddress, amountDeposited);
+        uint256 amountTokenToMint = calculateCollateralValue(amountDeposited);
         sendMessage(_destinationChainSelector, _receiver, amountTokenToMint);
     }
 
     /**
      * @notice this function is called by the user when they want to convert an amount of collateral into stablecoin on the secondary chain
-     * @param _tokenCollateralAddress the weth address
      * @param _destinationChainSelector the destination chain
      * @param _receiver the receiver address on the secondary chain
      * @param _amount the amount of collateral they want to convert into stablecoin
      */
-    function requestTokensOnSecondChain(
-        address _tokenCollateralAddress,
-        uint64 _destinationChainSelector,
-        address _receiver,
-        uint256 _amount
-    ) public {
+    function requestTokensOnSecondChain(uint64 _destinationChainSelector, address _receiver, uint256 _amount) public {
         if (s_amountDeposited[msg.sender] < _amount) {
             revert CollateralManager__InsufficientAmountDeposited();
         }
         uint256 amountDepositedAfterConvert = getAmountDeposited(msg.sender) - _amount;
         s_amountDeposited[msg.sender] -= amountDepositedAfterConvert;
-        uint256 amountTokenToMint = calculateCollateralValue(_tokenCollateralAddress, _amount);
+        uint256 amountTokenToMint = calculateCollateralValue(_amount);
         sendMessage(_destinationChainSelector, _receiver, amountTokenToMint);
     }
 
