@@ -30,7 +30,7 @@ contract CollateralManager is CCIPReceiver, Ownable {
         address feeToken,
         uint256 fees
     );
-    event MessageReceived(bytes32 indexed messageId, uint64 indexed sourceChainSelector, address sender, string text);
+    event MessageReceived(bytes32 indexed messageId, uint64 indexed sourceChainSelector, address sender, bytes data);
 
     mapping(address user => uint256 deposited) private s_amountDeposited;
     mapping(uint64 => bool) public s_allowListedDestinationChains;
@@ -41,7 +41,7 @@ contract CollateralManager is CCIPReceiver, Ownable {
     uint256 public constant PRECISION = 1e18;
     IERC20 private s_linkToken;
     bytes32 private s_lastReceivedMessageId;
-    string private s_lastReceivedText;
+    bytes private s_lastReceivedData;
 
     modifier moreThanZero(uint256 amount) {
         if (amount == 0) {
@@ -286,13 +286,10 @@ contract CollateralManager is CCIPReceiver, Ownable {
         onlyAllowListed(message.sourceChainSelector, abi.decode(message.sender, (address)))
     {
         s_lastReceivedMessageId = message.messageId;
-        s_lastReceivedText = abi.decode(message.data, (string));
+        s_lastReceivedData = message.data;
 
         emit MessageReceived(
-            message.messageId,
-            message.sourceChainSelector,
-            abi.decode(message.sender, (address)),
-            abi.decode(message.data, (string))
+            message.messageId, message.sourceChainSelector, abi.decode(message.sender, (address)), message.data
         );
     }
 
@@ -301,7 +298,7 @@ contract CollateralManager is CCIPReceiver, Ownable {
         return s_amountDeposited[_user];
     }
 
-    function getLastReceivedMessageDetails() public view returns (bytes32 messageId, string memory text) {
-        return (s_lastReceivedMessageId, s_lastReceivedText);
+    function getLastReceivedMessageDetails() public view returns (bytes32 messageId, bytes memory data) {
+        return (s_lastReceivedMessageId, s_lastReceivedData);
     }
 }
