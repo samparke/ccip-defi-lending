@@ -16,6 +16,7 @@ contract LendingManager is CCIPReceiver, Ownable {
     error LendingManager__InsufficientLinkBalance();
     error LendingManager__MustBeMoreThanZero();
     error LendingManager__MustBurnBeforeRequestingCollateral();
+    error LendingManager__DestinationChainNotAllowListed();
 
     event MessageSent(
         bytes32 indexed messageId,
@@ -42,8 +43,15 @@ contract LendingManager is CCIPReceiver, Ownable {
     modifier validateReceiver(address _receiver) {
         if (_receiver == address(0)) {
             revert LendingManager__InvalidReceiver();
-            _;
         }
+        _;
+    }
+
+    modifier onlyAllowListedDestinationChain(uint64 _destinationChainSelector) {
+        if (!s_allowedListedDestinationChains[_destinationChainSelector]) {
+            revert LendingManager__DestinationChainNotAllowListed();
+        }
+        _;
     }
 
     modifier onlyAllowedList(uint64 _sourceChainSelector, address _sender) {
@@ -66,6 +74,18 @@ contract LendingManager is CCIPReceiver, Ownable {
     constructor(IStablecoin _stablecoin, address _router, address _link) CCIPReceiver(_router) Ownable(msg.sender) {
         i_stablecoin = _stablecoin;
         s_linkToken = IERC20(_link);
+    }
+
+    function allowDestinationChain(uint64 _destinationChainSelector, bool _allowed) external onlyOwner {
+        s_allowedListedDestinationChains[_destinationChainSelector] = _allowed;
+    }
+
+    function allowSourceChain(uint64 _sourceChainSelector, bool _allowed) external onlyOwner {
+        s_allowedListedSourceChains[_sourceChainSelector] = _allowed;
+    }
+
+    function allowSender(address _sender, bool _allowed) public onlyOwner {
+        s_allowedListedSenders[_sender] = _allowed;
     }
 
     /**
@@ -114,6 +134,8 @@ contract LendingManager is CCIPReceiver, Ownable {
      */
     function sendMessage(uint64 _destinationChainSelector, address _receiver, bytes memory _amountStablecoinBurned)
         public
+        onlyAllowListedDestinationChain(_destinationChainSelector)
+        validateReceiver(_receiver)
         returns (bytes32 messageId)
     {
         Client.EVM2AnyMessage memory message =

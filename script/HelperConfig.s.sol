@@ -23,7 +23,7 @@ contract HelperConfig is Script {
         }
     }
 
-    function getSepoliaConfig() public returns (NetworkConfig memory) {
+    function getSepoliaConfig() public pure returns (NetworkConfig memory) {
         return NetworkConfig({
             wethAddress: 0xdd13E55209Fd76AfE204dBda4007C227904f0a81,
             wethPriceFeed: 0x694AA1769357215DE4FAC081bf1f309aDC325306

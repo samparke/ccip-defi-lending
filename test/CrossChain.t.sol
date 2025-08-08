@@ -15,8 +15,8 @@ contract CrossChain is Test {
     Stablecoin stablecoin;
     CollateralManager collateralManager;
     LendingManager lendingManager;
-    ERC20Mock wethMock = new ERC20Mock("WETH", "WETH", msg.sender, 100e8);
-    MockV3Aggregator wethPriceFeed = new MockV3Aggregator(DECIMALS, ETH_USD_PRICE);
+    ERC20Mock weth;
+    MockV3Aggregator wethPriceFeed;
     uint8 private constant DECIMALS = 8;
     int256 private constant ETH_USD_PRICE = 2000e8;
     uint256 sepoliaFork;
@@ -29,22 +29,26 @@ contract CrossChain is Test {
     Register.NetworkDetails arbSepoliaNetworkDetails;
 
     function setUp() public {
+        sepoliaFork = vm.createSelectFork("sepolia-eth");
+        arbSepoliaFork = vm.createFork("arb-sepolia");
         ccipLocalSimulatorFork = new CCIPLocalSimulatorFork();
         vm.makePersistent(address(ccipLocalSimulatorFork));
-        sepoliaFork = vm.createSelectFork(vm.envString("SEPOLIA_RPC_URL"));
-        arbSepoliaFork = vm.createFork(vm.envString("ARB_SEPOLIA_RPC_URL"));
 
         sepoliaNetworkDetails = ccipLocalSimulatorFork.getNetworkDetails(block.chainid);
         vm.makePersistent(sepoliaNetworkDetails.rmnProxyAddress);
         vm.makePersistent(sepoliaNetworkDetails.routerAddress);
 
-        vm.prank(owner);
+        vm.startPrank(owner);
+        weth = new ERC20Mock("WETH", "WETH", msg.sender, 100e8);
+        wethPriceFeed = new MockV3Aggregator(DECIMALS, ETH_USD_PRICE);
+        weth.mint(alice, 100 ether);
         collateralManager = new CollateralManager(
-            address(wethMock),
+            address(weth),
             address(wethPriceFeed),
             sepoliaNetworkDetails.routerAddress,
             sepoliaNetworkDetails.linkAddress
         );
+        vm.stopPrank();
 
         vm.selectFork(arbSepoliaFork);
         arbSepoliaNetworkDetails = ccipLocalSimulatorFork.getNetworkDetails(block.chainid);
@@ -58,6 +62,22 @@ contract CrossChain is Test {
             arbSepoliaNetworkDetails.routerAddress,
             arbSepoliaNetworkDetails.linkAddress
         );
+        stablecoin.grantMintAndBurnRole(address(lendingManager));
+        lendingManager.allowDestinationChain(sepoliaNetworkDetails.chainSelector, true);
+        lendingManager.allowSender(alice, true);
+        lendingManager.allowSourceChain(arbSepoliaNetworkDetails.chainSelector, true);
         vm.stopPrank();
+
+        vm.selectFork(sepoliaFork);
+        vm.startPrank(owner);
+        collateralManager.allowDestinationChain(arbSepoliaNetworkDetails.chainSelector, true);
+        collateralManager.allowSender(alice, true);
+        collateralManager.allowSourceChain(sepoliaNetworkDetails.chainSelector, true);
+        vm.stopPrank();
+    }
+
+    function testAliceInitialWethBalanceOnSepoliaFork() public view {
+        assertEq(vm.activeFork(), sepoliaFork);
+        assertEq(weth.balanceOf(alice), 100 ether);
     }
 }
