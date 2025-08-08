@@ -43,7 +43,7 @@ contract CollateralManager is CCIPReceiver, Ownable {
     uint256 public constant PRECISION = 1e18;
     IERC20 private s_linkToken;
     bytes32 private s_lastReceivedMessageId;
-    uint256 private s_lastReceivedData;
+    bytes private s_lastReceivedData;
     address private wethAddress;
     address private wethPriceFeedAddress;
 
@@ -97,7 +97,7 @@ contract CollateralManager is CCIPReceiver, Ownable {
         Ownable(msg.sender)
     {
         wethAddress = _wethAddress;
-        wethPriceFeedAddress = wethPriceFeedAddress;
+        wethPriceFeedAddress = _wethPriceFeed;
         s_linkToken = IERC20(_link);
     }
 
@@ -164,6 +164,10 @@ contract CollateralManager is CCIPReceiver, Ownable {
         emit Redeem(_user, msg.sender, _amount);
     }
 
+    function addToUserDepositMapping(address _account, uint256 _amountWeth) public {
+        s_amountDeposited[_account] += _amountWeth;
+    }
+
     // weth price calculation
 
     /**
@@ -185,6 +189,16 @@ contract CollateralManager is CCIPReceiver, Ownable {
         // we then multiply by _amount (which is also 18 decimals), giving us the price for the amount in 36 decimals
         // we then divide by 18 decimals to bring it back down to 18 decimals
         return (ethPrice * _amount) / PRECISION;
+    }
+
+    /**
+     * @notice this functon calculates the number of weth equates to the number of stablecoin the user burned
+     * @param _amount the amount of stablecoin the user minted on the second chain
+     */
+    function calculateWethTokenAmountFromStablecoin(uint256 _amount) public view returns (uint256) {
+        AggregatorV3Interface priceFeed = AggregatorV3Interface(wethPriceFeedAddress);
+        (, int256 price,,,) = priceFeed.latestRoundData();
+        return (_amount * PRECISION) / (uint256(price) * ADDITIONAL_PRECISION);
     }
 
     // sending the request
@@ -276,8 +290,9 @@ contract CollateralManager is CCIPReceiver, Ownable {
         onlyAllowListed(message.sourceChainSelector, abi.decode(message.sender, (address)))
     {
         s_lastReceivedMessageId = message.messageId;
-        s_lastReceivedData = abi.decode(message.data, (uint256));
-
+        s_lastReceivedData = message.data;
+        (address user, uint256 amount) = abi.decode(message.data, (address, uint256));
+        addToUserDepositMapping(user, amount);
         emit MessageReceived(
             message.messageId,
             message.sourceChainSelector,
@@ -291,7 +306,7 @@ contract CollateralManager is CCIPReceiver, Ownable {
         return s_amountDeposited[_user];
     }
 
-    function getLastReceivedMessageDetails() public view returns (bytes32 messageId, uint256 amountStablecoinBurned) {
+    function getLastReceivedMessageDetails() public view returns (bytes32 messageId, bytes memory data) {
         return (s_lastReceivedMessageId, s_lastReceivedData);
     }
 }
