@@ -7,7 +7,6 @@ import {Client} from "@ccip/contracts/src/v0.8/ccip/libraries/Client.sol";
 import {CCIPReceiver} from "@ccip/contracts/src/v0.8/ccip/applications/CCIPReceiver.sol";
 import {IRouterClient} from "@ccip/contracts/src/v0.8/ccip/interfaces/IRouterClient.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
-import {Strings} from "@openzeppelin/contracts/utils/Strings.sol";
 import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
 
 contract CollateralManager is CCIPReceiver, Ownable {
@@ -230,7 +229,7 @@ contract CollateralManager is CCIPReceiver, Ownable {
      * @param data this is the data we are sending, telling the secondary chain how much stablecoin to mint
      */
     function sendMessage(uint64 _destinationChainSelector, address _receiver, bytes memory data)
-        public
+        private
         onlyAllowListedDestinationChain(_destinationChainSelector)
         validateReceiver(_receiver)
         returns (bytes32 messageId)

@@ -170,4 +170,27 @@ contract CrossChainTest is Test {
         collateralManager.redeem(10 ether);
         assertEq(weth.balanceOf(alice), ALICE_STARTING_WETH_BALANCE);
     }
+
+    function testNotAllowedSourceChainRevert() public {
+        vm.prank(owner);
+        collateralManager.allowSourceChain(arbSepoliaNetworkDetails.chainSelector, false);
+
+        vm.startPrank(alice);
+        ERC20Mock(weth).approve(address(collateralManager), 10 ether);
+        collateralManager.deposit(10 ether);
+        vm.stopPrank();
+        ccipLocalSimulatorFork.requestLinkFromFaucet(address(collateralManager), 1e21);
+        vm.prank(alice);
+        collateralManager.requestAllTokenOnSecondChain(arbSepoliaNetworkDetails.chainSelector, address(lendingManager));
+        ccipLocalSimulatorFork.switchChainAndRouteMessage(arbSepoliaFork);
+
+        vm.selectFork(arbSepoliaFork);
+        ccipLocalSimulatorFork.requestLinkFromFaucet(address(lendingManager), 1e21);
+        vm.startPrank(alice);
+        lendingManager.burnStablecoin(alice, stablecoin.balanceOf(alice));
+        lendingManager.requestCollateralReturn(sepoliaNetworkDetails.chainSelector, address(collateralManager));
+        vm.stopPrank();
+        vm.expectRevert();
+        ccipLocalSimulatorFork.switchChainAndRouteMessage(sepoliaFork);
+    }
 }

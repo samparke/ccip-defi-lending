@@ -147,4 +147,53 @@ contract CollateralManagerTest is Test {
         emit CollateralManager.Redeem(user, 10 ether);
         collateralManager.redeem(10 ether);
     }
+
+    // request tokens
+
+    function testRequestTokensInsufficientBalanceRevert() public deposit {
+        vm.prank(user);
+        vm.expectRevert(CollateralManager.CollateralManager__InsufficientAmountDeposited.selector);
+        collateralManager.requestTokensOnSecondChain(
+            arbSepoliaNetworkDetails.chainSelector, address(lendingManager), 11 ether
+        );
+    }
+
+    // calculate
+
+    function testCorrectTokenAmountFromStablecoin() public view {
+        // for $2000 (2000e18 in ether decimals), it should equal 1 ether
+        assertEq(collateralManager.calculateWethTokenAmountFromStablecoin(2000e18), 1 ether);
+    }
+
+    function testCorrectCalculateCollateralValue() public view {
+        assertEq(collateralManager.calculateCollateralValue(1 ether), 2000e18);
+    }
+
+    // insuffcient link revert
+
+    function testInsufficientLinkRevert() public deposit {
+        vm.prank(user);
+        vm.expectRevert(CollateralManager.CollateralManager__InsufficientLinkBalance.selector);
+        collateralManager.requestAllTokenOnSecondChain(arbSepoliaNetworkDetails.chainSelector, address(lendingManager));
+    }
+
+    // invalid receiver revert
+
+    function testInvalidReceiverRevert() public deposit {
+        ccipLocalSimulatorFork.requestLinkFromFaucet(address(collateralManager), 1e21);
+        vm.prank(user);
+        vm.expectRevert(CollateralManager.CollateralManager__InvalidReceiver.selector);
+        collateralManager.requestAllTokenOnSecondChain(arbSepoliaNetworkDetails.chainSelector, address(0));
+    }
+
+    // not allowed destination chain
+
+    function testNotAllowedDestinationChainRevert() public deposit {
+        ccipLocalSimulatorFork.requestLinkFromFaucet(address(collateralManager), 1e21);
+        vm.prank(owner);
+        collateralManager.allowDestinationChain(arbSepoliaNetworkDetails.chainSelector, false);
+        vm.prank(user);
+        vm.expectRevert(CollateralManager.CollateralManager__DestinationChainNotAllowListed.selector);
+        collateralManager.requestAllTokenOnSecondChain(arbSepoliaNetworkDetails.chainSelector, address(lendingManager));
+    }
 }
