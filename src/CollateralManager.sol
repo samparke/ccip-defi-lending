@@ -129,19 +129,6 @@ contract CollateralManager is CCIPReceiver, Ownable {
         emit Deposit(msg.sender, _amount);
     }
 
-    // function depositAndRequestToken(uint256 _amount, uint64 _destinationChainSelector, address _receiver)
-    //     external
-    //     moreThanZero(_amount)
-    // {
-    //     s_amountDeposited[msg.sender] += _amount;
-    //     bool success = IERC20(wethAddress).transferFrom(msg.sender, address(this), _amount);
-    //     if (!success) {
-    //         revert CollateralManager__DepositFailed(msg.sender);
-    //     }
-    //     emit Deposit(msg.sender, _amount);
-    //     requestTokensOnSecondChain(_destinationChainSelector, _receiver, _amount);
-    // }
-
     /**
      * @notice this function is for the user to redeem the collateral they have deposited
      * @param _amount the amount to redeem
@@ -222,16 +209,17 @@ contract CollateralManager is CCIPReceiver, Ownable {
      * @param _receiver the receiver address on the secondary chain
      * @param _amount the amount of collateral they want to convert into stablecoin
      */
-    // function requestTokensOnSecondChain(uint64 _destinationChainSelector, address _receiver, uint256 _amount) public {
-    //     uint256 amountDeposited = getAmountDeposited(msg.sender);
-    //     if (s_amountDeposited[msg.sender] < _amount) {
-    //         revert CollateralManager__InsufficientAmountDeposited();
-    //     }
-    //     uint256 amountDepositedAfterConvert = amountDeposited - _amount;
-    //     s_amountDeposited[msg.sender] -= amountDepositedAfterConvert;
-    //     uint256 amountTokenToMint = calculateCollateralValue(_amount);
-    //     sendMessage(_destinationChainSelector, _receiver, amountTokenToMint);
-    // }
+    function requestTokensOnSecondChain(uint64 _destinationChainSelector, address _receiver, uint256 _amount) public {
+        uint256 amountDeposited = getAmountDeposited(msg.sender);
+        if (amountDeposited < _amount) {
+            revert CollateralManager__InsufficientAmountDeposited();
+        }
+        uint256 amountDepositedAfterConvert = amountDeposited - _amount;
+        s_amountDeposited[msg.sender] -= amountDepositedAfterConvert;
+        uint256 amountTokenToMint = calculateCollateralValue(_amount);
+        bytes memory data = abi.encode(msg.sender, amountTokenToMint);
+        sendMessage(_destinationChainSelector, _receiver, data);
+    }
 
     /**
      *

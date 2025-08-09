@@ -84,7 +84,7 @@ contract CrossChain is Test {
         assertEq(weth.balanceOf(alice), 100 ether);
     }
 
-    function testDepositWethOnSepoliaAndMintStablecoinOnArbSepolia() public {
+    function testDepositWethOnSepoliaAndMintAllStablecoinOnArbSepolia() public {
         vm.startPrank(alice);
         ERC20Mock(weth).approve(address(collateralManager), 10 ether);
         collateralManager.deposit(10 ether);
@@ -106,5 +106,31 @@ contract CrossChain is Test {
         (address user, uint256 amount) = abi.decode(data, (address, uint256));
         console.log("last received message details:", user, amount);
         assertGt(stablecoin.balanceOf(alice), aliceStablecoinBalanceBefore);
+    }
+
+    function testDepositWethOnSepoliaAndMintStablecoinOnArbSepolia() public {
+        vm.startPrank(alice);
+        IERC20(address(weth)).approve(address(collateralManager), 10 ether);
+        collateralManager.deposit(10 ether);
+        vm.stopPrank();
+
+        ccipLocalSimulatorFork.requestLinkFromFaucet(address(collateralManager), 1e21);
+        vm.prank(alice);
+        collateralManager.requestTokensOnSecondChain(
+            arbSepoliaNetworkDetails.chainSelector, address(lendingManager), 5 ether
+        );
+
+        vm.selectFork(arbSepoliaFork);
+        uint256 aliceBalanceBefore = stablecoin.balanceOf(alice);
+
+        vm.selectFork(sepoliaFork);
+        ccipLocalSimulatorFork.switchChainAndRouteMessage(arbSepoliaFork);
+
+        vm.selectFork(arbSepoliaFork);
+        vm.warp(block.timestamp + 20 minutes);
+        (, bytes memory data) = lendingManager.getLastReceivedMessageDetails();
+        (address user, uint256 amount) = abi.decode(data, (address, uint256));
+        console.log("data received:", user, amount);
+        assertGt(stablecoin.balanceOf(alice), aliceBalanceBefore);
     }
 }
