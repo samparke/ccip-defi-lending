@@ -164,10 +164,11 @@ contract LendingManager is CCIPReceiver, Ownable {
     {
         s_lastReceivedMessageId = message.messageId;
         s_lastReceivedData = message.data;
-
         emit MessageReceived(
             message.messageId, message.sourceChainSelector, abi.decode(message.sender, (address)), message.data
         );
+        (address user, uint256 amount) = abi.decode(message.data, (address, uint256));
+        i_stablecoin.mint(user, amount);
     }
 
     /**
@@ -200,5 +201,9 @@ contract LendingManager is CCIPReceiver, Ownable {
 
     function getBalance(address _user) public view returns (uint256) {
         return i_stablecoin.balanceOf(_user);
+    }
+
+    function getLastReceivedMessageDetails() public view returns (bytes32 messageId, bytes memory data) {
+        return (s_lastReceivedMessageId, s_lastReceivedData);
     }
 }

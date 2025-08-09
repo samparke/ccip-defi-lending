@@ -1,7 +1,7 @@
 //SPDX-License-Identifier:MIT
 pragma solidity ^0.8.24;
 
-import {Test} from "forge-std/Test.sol";
+import {Test, console} from "forge-std/Test.sol";
 import {CollateralManager} from "../src/CollateralManager.sol";
 import {LendingManager} from "../src/LendingManager.sol";
 import {IStablecoin} from "../src/interfaces/IStablecoin.sol";
@@ -9,6 +9,9 @@ import {Stablecoin} from "../src/Stablecoin.sol";
 import {MockV3Aggregator} from "../test/mocks/MockV3Aggregator.sol";
 import {ERC20Mock} from "../test/mocks/ERC20Mock.sol";
 import {CCIPLocalSimulatorFork, Register} from "@chainlink-local/src/ccip/CCIPLocalSimulatorFork.sol";
+import {Client} from "@ccip/contracts/src/v0.8/ccip/libraries/Client.sol";
+import {IRouterClient} from "@ccip/contracts/src/v0.8/ccip/interfaces/IRouterClient.sol";
+import {IERC20} from "@ccip/contracts/src/v0.8/vendor/openzeppelin-solidity/v4.8.3/contracts/token/ERC20/IERC20.sol";
 
 contract CrossChain is Test {
     CCIPLocalSimulatorFork ccipLocalSimulatorFork;
@@ -64,20 +67,44 @@ contract CrossChain is Test {
         );
         stablecoin.grantMintAndBurnRole(address(lendingManager));
         lendingManager.allowDestinationChain(sepoliaNetworkDetails.chainSelector, true);
-        lendingManager.allowSender(alice, true);
-        lendingManager.allowSourceChain(arbSepoliaNetworkDetails.chainSelector, true);
+        lendingManager.allowSender(address(collateralManager), true);
+        lendingManager.allowSourceChain(sepoliaNetworkDetails.chainSelector, true);
         vm.stopPrank();
 
         vm.selectFork(sepoliaFork);
         vm.startPrank(owner);
         collateralManager.allowDestinationChain(arbSepoliaNetworkDetails.chainSelector, true);
-        collateralManager.allowSender(alice, true);
-        collateralManager.allowSourceChain(sepoliaNetworkDetails.chainSelector, true);
+        collateralManager.allowSender(address(lendingManager), true);
+        collateralManager.allowSourceChain(arbSepoliaNetworkDetails.chainSelector, true);
         vm.stopPrank();
     }
 
     function testAliceInitialWethBalanceOnSepoliaFork() public view {
         assertEq(vm.activeFork(), sepoliaFork);
         assertEq(weth.balanceOf(alice), 100 ether);
+    }
+
+    function testDepositWethOnSepoliaAndMintStablecoinOnArbSepolia() public {
+        vm.startPrank(alice);
+        ERC20Mock(weth).approve(address(collateralManager), 10 ether);
+        collateralManager.deposit(10 ether);
+        vm.stopPrank();
+
+        ccipLocalSimulatorFork.requestLinkFromFaucet(address(collateralManager), 1e21);
+        vm.prank(alice);
+        collateralManager.requestAllTokenOnSecondChain(arbSepoliaNetworkDetails.chainSelector, address(lendingManager));
+
+        vm.selectFork(arbSepoliaFork);
+        uint256 aliceStablecoinBalanceBefore = stablecoin.balanceOf(alice);
+
+        vm.selectFork(sepoliaFork);
+        ccipLocalSimulatorFork.switchChainAndRouteMessage(arbSepoliaFork);
+
+        vm.selectFork(arbSepoliaFork);
+        vm.warp(block.timestamp + 20 minutes);
+        (, bytes memory data) = lendingManager.getLastReceivedMessageDetails();
+        (address user, uint256 amount) = abi.decode(data, (address, uint256));
+        console.log("last received message details:", user, amount);
+        assertGt(stablecoin.balanceOf(alice), aliceStablecoinBalanceBefore);
     }
 }
