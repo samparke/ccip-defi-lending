@@ -27,6 +27,7 @@ contract CrossChain is Test {
     address alice = makeAddr("alice");
     address bob = makeAddr("bob");
     address owner = makeAddr("owner");
+    uint256 private constant ALICE_STARTING_WETH_BALANCE = 100 ether;
 
     Register.NetworkDetails sepoliaNetworkDetails;
     Register.NetworkDetails arbSepoliaNetworkDetails;
@@ -44,7 +45,7 @@ contract CrossChain is Test {
         vm.startPrank(owner);
         weth = new ERC20Mock("WETH", "WETH", msg.sender, 100e8);
         wethPriceFeed = new MockV3Aggregator(DECIMALS, ETH_USD_PRICE);
-        weth.mint(alice, 100 ether);
+        weth.mint(alice, ALICE_STARTING_WETH_BALANCE);
         collateralManager = new CollateralManager(
             address(weth),
             address(wethPriceFeed),
@@ -132,5 +133,41 @@ contract CrossChain is Test {
         (address user, uint256 amount) = abi.decode(data, (address, uint256));
         console.log("data received:", user, amount);
         assertGt(stablecoin.balanceOf(alice), aliceBalanceBefore);
+    }
+
+    function testAliceDepositsWethAndBurnsStablecoinAndRedeemsWeth() public {
+        vm.startPrank(alice);
+        ERC20Mock(weth).approve(address(collateralManager), 10 ether);
+        collateralManager.deposit(10 ether);
+        vm.stopPrank();
+        assertEq(collateralManager.getAmountDeposited(alice), 10 ether);
+        ccipLocalSimulatorFork.requestLinkFromFaucet(address(collateralManager), 1e21);
+        vm.prank(alice);
+        collateralManager.requestAllTokenOnSecondChain(arbSepoliaNetworkDetails.chainSelector, address(lendingManager));
+        ccipLocalSimulatorFork.switchChainAndRouteMessage(arbSepoliaFork);
+
+        vm.selectFork(sepoliaFork);
+        assertEq(collateralManager.getAmountDeposited(alice), 0);
+
+        vm.selectFork(arbSepoliaFork);
+        vm.warp(block.timestamp + 20 minutes);
+        assertGt(stablecoin.balanceOf(alice), 0);
+
+        ccipLocalSimulatorFork.requestLinkFromFaucet(address(lendingManager), 1e21);
+        vm.startPrank(alice);
+        lendingManager.burnStablecoin(alice, stablecoin.balanceOf(alice));
+        lendingManager.requestCollateralReturn(sepoliaNetworkDetails.chainSelector, address(collateralManager));
+        vm.stopPrank();
+        ccipLocalSimulatorFork.switchChainAndRouteMessage(sepoliaFork);
+
+        vm.selectFork(arbSepoliaFork);
+        assertEq(stablecoin.balanceOf(alice), 0);
+
+        vm.selectFork(sepoliaFork);
+        assertEq(collateralManager.getAmountDeposited(alice), 10 ether);
+
+        vm.prank(alice);
+        collateralManager.redeem(10 ether);
+        assertEq(weth.balanceOf(alice), ALICE_STARTING_WETH_BALANCE);
     }
 }

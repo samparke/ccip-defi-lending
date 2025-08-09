@@ -142,17 +142,9 @@ contract CollateralManager is CCIPReceiver, Ownable {
         emit Redeem(msg.sender, msg.sender, _amount);
     }
 
-    function redeemForUser(address _user, uint256 _amount) external {
-        if (s_amountDeposited[msg.sender] < _amount) {
-            revert CollateralManager__CannotRedeemMoreThanDeposited();
-        }
-        s_amountDeposited[_user] -= _amount;
-        IERC20(wethAddress).transferFrom(address(this), _user, _amount);
-        emit Redeem(_user, msg.sender, _amount);
-    }
-
-    function addToUserDepositMapping(address _account, uint256 _amountWeth) public {
-        s_amountDeposited[_account] += _amountWeth;
+    function addToUserDepositMapping(address _account, uint256 _amountStableCoin) public {
+        uint256 amountWeth = calculateWethTokenAmountFromStablecoin(_amountStableCoin);
+        s_amountDeposited[_account] += amountWeth;
     }
 
     // weth price calculation

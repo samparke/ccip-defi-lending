@@ -146,6 +146,7 @@ contract LendingManager is CCIPReceiver, Ownable {
         if (fee > s_linkToken.balanceOf(address(this))) {
             revert LendingManager__InsufficientLinkBalance();
         }
+        s_linkToken.approve(address(router), fee);
         messageId = router.ccipSend(_destinationChainSelector, message);
         emit MessageSent(
             messageId, _destinationChainSelector, _receiver, _amountStablecoinBurned, address(s_linkToken), fee
