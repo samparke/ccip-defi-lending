@@ -8,6 +8,7 @@ import {CCIPReceiver} from "@ccip/contracts/src/v0.8/ccip/applications/CCIPRecei
 import {IRouterClient} from "@ccip/contracts/src/v0.8/ccip/interfaces/IRouterClient.sol";
 import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
 import {Strings} from "@openzeppelin/contracts/utils/Strings.sol";
+import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
 
 contract CollateralManager is CCIPReceiver, Ownable {
     error CollateralManager__DepositFailed(address user);
@@ -19,9 +20,11 @@ contract CollateralManager is CCIPReceiver, Ownable {
     error CollateralManager__SourceChainNotAllowedList();
     error CollateralManager__SenderNotAllowedList();
     error CollateralManager__InsufficientAmountDeposited();
+    error CollateralManager__RedeemFailed();
+    error CollateralManager__AddToDepositCannotBeZero();
 
     event Deposit(address indexed user, uint256 amount);
-    event Redeem(address indexed redeemedFor, address indexed redeemedBy, uint256 amount);
+    event Redeem(address indexed user, uint256 amount);
     event MessageSent(
         bytes32 indexed messageId,
         uint64 indexed destinationChainSelector,
@@ -33,6 +36,7 @@ contract CollateralManager is CCIPReceiver, Ownable {
     event MessageReceived(
         bytes32 indexed messageId, uint64 indexed sourceChainSelector, address sender, uint256 amountStablecoinBurned
     );
+    event CollateralAddedToMapping(address _account, uint256 _amount);
 
     mapping(address user => uint256 deposited) private s_amountDeposited;
     mapping(uint64 => bool) public s_allowListedDestinationChains;
@@ -138,13 +142,20 @@ contract CollateralManager is CCIPReceiver, Ownable {
             revert CollateralManager__CannotRedeemMoreThanDeposited();
         }
         s_amountDeposited[msg.sender] -= _amount;
-        IERC20(wethAddress).transfer(msg.sender, _amount);
-        emit Redeem(msg.sender, msg.sender, _amount);
+        bool success = IERC20(wethAddress).transfer(msg.sender, _amount);
+        if (!success) {
+            revert CollateralManager__RedeemFailed();
+        }
+        emit Redeem(msg.sender, _amount);
     }
 
-    function addToUserDepositMapping(address _account, uint256 _amountStableCoin) public {
+    function _addToUserDepositMapping(address _account, uint256 _amountStableCoin) private {
+        if (_amountStableCoin == 0) {
+            revert CollateralManager__AddToDepositCannotBeZero();
+        }
         uint256 amountWeth = calculateWethTokenAmountFromStablecoin(_amountStableCoin);
         s_amountDeposited[_account] += amountWeth;
+        emit CollateralAddedToMapping(_account, amountWeth);
     }
 
     // weth price calculation
@@ -206,8 +217,7 @@ contract CollateralManager is CCIPReceiver, Ownable {
         if (amountDeposited < _amount) {
             revert CollateralManager__InsufficientAmountDeposited();
         }
-        uint256 amountDepositedAfterConvert = amountDeposited - _amount;
-        s_amountDeposited[msg.sender] -= amountDepositedAfterConvert;
+        s_amountDeposited[msg.sender] -= _amount;
         uint256 amountTokenToMint = calculateCollateralValue(_amount);
         bytes memory data = abi.encode(msg.sender, amountTokenToMint);
         sendMessage(_destinationChainSelector, _receiver, data);
@@ -276,7 +286,7 @@ contract CollateralManager is CCIPReceiver, Ownable {
         s_lastReceivedMessageId = message.messageId;
         s_lastReceivedData = message.data;
         (address user, uint256 amount) = abi.decode(message.data, (address, uint256));
-        addToUserDepositMapping(user, amount);
+        _addToUserDepositMapping(user, amount);
         emit MessageReceived(
             message.messageId,
             message.sourceChainSelector,
