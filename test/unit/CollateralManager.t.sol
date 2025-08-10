@@ -2,16 +2,19 @@
 pragma solidity ^0.8.24;
 
 import {Test, console} from "forge-std/Test.sol";
-import {CollateralManager} from "../src/CollateralManager.sol";
-import {LendingManager} from "../src/LendingManager.sol";
-import {IStablecoin} from "../src/interfaces/IStablecoin.sol";
-import {Stablecoin} from "../src/Stablecoin.sol";
-import {MockV3Aggregator} from "../test/mocks/MockV3Aggregator.sol";
-import {ERC20Mock} from "../test/mocks/ERC20Mock.sol";
+import {CollateralManager} from "../../src/CollateralManager.sol";
+import {LendingManager} from "../../src/LendingManager.sol";
+import {IStablecoin} from "../../src/interfaces/IStablecoin.sol";
+import {Stablecoin} from "../../src/Stablecoin.sol";
+import {MockV3Aggregator} from "../../test/mocks/MockV3Aggregator.sol";
+import {ERC20Mock} from "../../test/mocks/ERC20Mock.sol";
 import {CCIPLocalSimulatorFork, Register} from "@chainlink-local/src/ccip/CCIPLocalSimulatorFork.sol";
 import {Client} from "@ccip/contracts/src/v0.8/ccip/libraries/Client.sol";
 import {IRouterClient} from "@ccip/contracts/src/v0.8/ccip/interfaces/IRouterClient.sol";
 import {IERC20} from "@ccip/contracts/src/v0.8/vendor/openzeppelin-solidity/v4.8.3/contracts/token/ERC20/IERC20.sol";
+import {Ownable} from "@openzeppelin/contracts/access/Ownable.sol";
+import {ERC20MockFailTransferFrom} from "../mocks/ERC20MockFailTransferFrom.sol";
+import {ERC20MockFailTransfer} from "../mocks/ERC20MockFailTransfer.sol";
 
 contract CollateralManagerTest is Test {
     CCIPLocalSimulatorFork ccipLocalSimulatorFork;
@@ -124,6 +127,25 @@ contract CollateralManagerTest is Test {
         collateralManager.deposit(10 ether);
     }
 
+    function testDepositFail() public {
+        vm.startPrank(owner);
+        ERC20MockFailTransferFrom mockWeth = new ERC20MockFailTransferFrom("WETH", "WETH", msg.sender, 100e8);
+        mockWeth.mint(user, USER_STARTING_WETH_BALANCE);
+        collateralManager = new CollateralManager(
+            address(mockWeth),
+            address(wethPriceFeed),
+            sepoliaNetworkDetails.routerAddress,
+            sepoliaNetworkDetails.linkAddress
+        );
+        vm.stopPrank();
+
+        vm.prank(user);
+        mockWeth.approve(address(collateralManager), 10 ether);
+        vm.prank(user);
+        vm.expectRevert(abi.encodeWithSelector(CollateralManager.CollateralManager__DepositFailed.selector, user));
+        collateralManager.deposit(1 ether);
+    }
+
     // redeem
 
     function testRedeemUserWethBalanceIncreases() public deposit {
@@ -146,6 +168,27 @@ contract CollateralManagerTest is Test {
         vm.expectEmit();
         emit CollateralManager.Redeem(user, 10 ether);
         collateralManager.redeem(10 ether);
+    }
+
+    function testRedeemFail() public {
+        vm.startPrank(owner);
+        ERC20MockFailTransfer mockWeth = new ERC20MockFailTransfer("WETH", "WETH", msg.sender, 100e8);
+        mockWeth.mint(user, USER_STARTING_WETH_BALANCE);
+        collateralManager = new CollateralManager(
+            address(mockWeth),
+            address(wethPriceFeed),
+            sepoliaNetworkDetails.routerAddress,
+            sepoliaNetworkDetails.linkAddress
+        );
+        vm.stopPrank();
+
+        vm.prank(user);
+        mockWeth.approve(address(collateralManager), 10 ether);
+        vm.prank(user);
+        collateralManager.deposit(1 ether);
+        vm.prank(user);
+        vm.expectRevert(abi.encodeWithSelector(CollateralManager.CollateralManager__RedeemFailed.selector, user));
+        collateralManager.redeem(1 ether);
     }
 
     // request tokens
@@ -195,5 +238,62 @@ contract CollateralManagerTest is Test {
         vm.prank(user);
         vm.expectRevert(CollateralManager.CollateralManager__DestinationChainNotAllowListed.selector);
         collateralManager.requestAllTokenOnSecondChain(arbSepoliaNetworkDetails.chainSelector, address(lendingManager));
+    }
+
+    function testOnlyOwnerCanNotAllowDestinationChainRevert() public {
+        vm.prank(user);
+        vm.expectPartialRevert(Ownable.OwnableUnauthorizedAccount.selector);
+        collateralManager.allowDestinationChain(arbSepoliaNetworkDetails.chainSelector, false);
+    }
+
+    // not allowed source chain
+
+    function testNotAllowedSourceChainArbSepolia() public {
+        vm.selectFork(sepoliaFork);
+        vm.prank(user);
+        weth.approve(address(collateralManager), 10 ether);
+        vm.prank(user);
+        collateralManager.deposit(10 ether);
+
+        ccipLocalSimulatorFork.requestLinkFromFaucet(address(collateralManager), 1e21);
+        vm.prank(user);
+        collateralManager.requestAllTokenOnSecondChain(arbSepoliaNetworkDetails.chainSelector, address(lendingManager));
+        ccipLocalSimulatorFork.switchChainAndRouteMessage(arbSepoliaFork);
+
+        vm.selectFork(sepoliaFork);
+        vm.prank(owner);
+        collateralManager.allowSourceChain(arbSepoliaNetworkDetails.chainSelector, false);
+
+        vm.selectFork(arbSepoliaFork);
+        ccipLocalSimulatorFork.requestLinkFromFaucet(address(lendingManager), 1e21);
+        vm.prank(user);
+        lendingManager.burnStablecoin(1 ether);
+        vm.prank(user);
+        lendingManager.requestCollateralReturn(sepoliaNetworkDetails.chainSelector, address(collateralManager));
+        vm.expectRevert();
+        ccipLocalSimulatorFork.switchChainAndRouteMessage(sepoliaFork);
+    }
+
+    // collateral added to mapping event
+
+    function testAddCollateralEvent() public {
+        vm.startPrank(user);
+        ERC20Mock(weth).approve(address(collateralManager), 10 ether);
+        collateralManager.deposit(10 ether);
+        vm.stopPrank();
+
+        ccipLocalSimulatorFork.requestLinkFromFaucet(address(collateralManager), 1e21);
+        vm.prank(user);
+        collateralManager.requestAllTokenOnSecondChain(arbSepoliaNetworkDetails.chainSelector, address(lendingManager));
+        ccipLocalSimulatorFork.switchChainAndRouteMessage(arbSepoliaFork);
+
+        ccipLocalSimulatorFork.requestLinkFromFaucet(address(lendingManager), 1e21);
+        vm.startPrank(user);
+        lendingManager.burnStablecoin(stablecoin.balanceOf(user));
+        lendingManager.requestCollateralReturn(sepoliaNetworkDetails.chainSelector, address(collateralManager));
+        vm.stopPrank();
+        vm.expectEmit();
+        emit CollateralManager.CollateralAddedToMapping(user, 10 ether);
+        ccipLocalSimulatorFork.switchChainAndRouteMessage(sepoliaFork);
     }
 }

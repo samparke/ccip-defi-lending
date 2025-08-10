@@ -155,7 +155,7 @@ contract CrossChainTest is Test {
 
         ccipLocalSimulatorFork.requestLinkFromFaucet(address(lendingManager), 1e21);
         vm.startPrank(alice);
-        lendingManager.burnStablecoin(alice, stablecoin.balanceOf(alice));
+        lendingManager.burnStablecoin(stablecoin.balanceOf(alice));
         lendingManager.requestCollateralReturn(sepoliaNetworkDetails.chainSelector, address(collateralManager));
         vm.stopPrank();
         ccipLocalSimulatorFork.switchChainAndRouteMessage(sepoliaFork);
@@ -187,7 +187,7 @@ contract CrossChainTest is Test {
         vm.selectFork(arbSepoliaFork);
         ccipLocalSimulatorFork.requestLinkFromFaucet(address(lendingManager), 1e21);
         vm.startPrank(alice);
-        lendingManager.burnStablecoin(alice, stablecoin.balanceOf(alice));
+        lendingManager.burnStablecoin(stablecoin.balanceOf(alice));
         lendingManager.requestCollateralReturn(sepoliaNetworkDetails.chainSelector, address(collateralManager));
         vm.stopPrank();
         vm.expectRevert();

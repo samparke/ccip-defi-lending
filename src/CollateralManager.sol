@@ -19,7 +19,7 @@ contract CollateralManager is CCIPReceiver, Ownable {
     error CollateralManager__SourceChainNotAllowedList();
     error CollateralManager__SenderNotAllowedList();
     error CollateralManager__InsufficientAmountDeposited();
-    error CollateralManager__RedeemFailed();
+    error CollateralManager__RedeemFailed(address user);
     error CollateralManager__AddToDepositCannotBeZero();
 
     event Deposit(address indexed user, uint256 amount);
@@ -143,7 +143,7 @@ contract CollateralManager is CCIPReceiver, Ownable {
         s_amountDeposited[msg.sender] -= _amount;
         bool success = IERC20(wethAddress).transfer(msg.sender, _amount);
         if (!success) {
-            revert CollateralManager__RedeemFailed();
+            revert CollateralManager__RedeemFailed(msg.sender);
         }
         emit Redeem(msg.sender, _amount);
     }

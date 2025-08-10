@@ -17,6 +17,7 @@ contract LendingManager is CCIPReceiver, Ownable {
     error LendingManager__MustBeMoreThanZero();
     error LendingManager__MustBurnBeforeRequestingCollateral();
     error LendingManager__DestinationChainNotAllowListed();
+    error LendingManager__CanOnlyBurnYourOwnTokens();
 
     event MessageSent(
         bytes32 indexed messageId,
@@ -93,20 +94,19 @@ contract LendingManager is CCIPReceiver, Ownable {
      * @param _account the account we are minting stablecoin to
      * @param _amount the amount of stablecoin we are minting
      */
-    function mintStablecoin(address _account, uint256 _amount) public moreThanZero(_amount) {
+    function _mintStablecoin(address _account, uint256 _amount) internal moreThanZero(_amount) {
         i_stablecoin.mint(_account, _amount);
         emit StablecoinMinted(_account, _amount);
     }
 
     /**
      * @notice burns stablecoin from user
-     * @param _account the account we are burning stablecoin from
      * @param _amount thw amount of stablecoin we are burning
      */
-    function burnStablecoin(address _account, uint256 _amount) public moreThanZero(_amount) {
-        s_stablecoinBurned[_account] += _amount;
-        i_stablecoin.burn(_account, _amount);
-        emit StablecoinBurned(_account, _amount);
+    function burnStablecoin(uint256 _amount) external moreThanZero(_amount) {
+        s_stablecoinBurned[msg.sender] += _amount;
+        i_stablecoin.burn(msg.sender, _amount);
+        emit StablecoinBurned(msg.sender, _amount);
     }
 
     /**
@@ -206,5 +206,17 @@ contract LendingManager is CCIPReceiver, Ownable {
 
     function getLastReceivedMessageDetails() public view returns (bytes32 messageId, bytes memory data) {
         return (s_lastReceivedMessageId, s_lastReceivedData);
+    }
+
+    function getIsAllowedSender(address _sender) public view returns (bool) {
+        return s_allowedListedSenders[_sender];
+    }
+
+    function getIsAllowedDestinationChain(uint64 _destinationChain) public view returns (bool) {
+        return s_allowedListedDestinationChains[_destinationChain];
+    }
+
+    function getIsAllowedSourceChain(uint64 _sourceChain) public view returns (bool) {
+        return s_allowedListedSourceChains[_sourceChain];
     }
 }
