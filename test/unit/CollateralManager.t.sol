@@ -29,7 +29,7 @@ contract CollateralManagerTest is Test {
     uint256 arbSepoliaFork;
     address user = makeAddr("user");
     address owner = makeAddr("owner");
-    uint256 private constant USER_STARTING_WETH_BALANCE = 100 ether;
+    uint256 internal deposited;
 
     Register.NetworkDetails sepoliaNetworkDetails;
     Register.NetworkDetails arbSepoliaNetworkDetails;
@@ -47,7 +47,6 @@ contract CollateralManagerTest is Test {
         vm.startPrank(owner);
         weth = new ERC20Mock("WETH", "WETH", msg.sender, 100e8);
         wethPriceFeed = new MockV3Aggregator(DECIMALS, ETH_USD_PRICE);
-        weth.mint(user, USER_STARTING_WETH_BALANCE);
         collateralManager = new CollateralManager(
             address(weth),
             address(wethPriceFeed),
@@ -82,11 +81,14 @@ contract CollateralManagerTest is Test {
         vm.stopPrank();
     }
 
-    modifier deposit() {
+    modifier deposit(uint256 amount) {
+        amount = bound(amount, 1e5, type(uint96).max);
+        deposited = amount;
+        weth.mint(user, amount);
         vm.prank(user);
-        weth.approve(address(collateralManager), 10 ether);
+        weth.approve(address(collateralManager), amount);
         vm.prank(user);
-        collateralManager.deposit(10 ether);
+        collateralManager.deposit(amount);
         _;
     }
 
@@ -95,42 +97,50 @@ contract CollateralManagerTest is Test {
         collateralManager.deposit(0);
     }
 
-    function testDepositTransfersFromUserToContract() public {
+    function testDepositTransfersFromUserToContract(uint256 amount) public {
+        amount = bound(amount, 1e5, type(uint96).max);
+        weth.mint(user, amount);
         uint256 userBalanceBefore = weth.balanceOf(user);
-        assertEq(userBalanceBefore, USER_STARTING_WETH_BALANCE);
+        assertEq(userBalanceBefore, amount);
         vm.prank(user);
-        weth.approve(address(collateralManager), 10 ether);
+        weth.approve(address(collateralManager), amount);
         vm.prank(user);
-        collateralManager.deposit(10 ether);
+        collateralManager.deposit(amount);
         uint256 userBalanceAfter = weth.balanceOf(user);
-        assertEq(userBalanceAfter, 90 ether);
-        assertEq(weth.balanceOf(address(collateralManager)), 10 ether);
+        assertEq(userBalanceAfter, 0);
+        assertEq(weth.balanceOf(address(collateralManager)), amount);
     }
 
-    function testDepositUserMappingIncreases() public {
+    function testDepositUserMappingIncreases(uint256 amount) public {
+        amount = bound(amount, 1e5, type(uint96).max);
+        weth.mint(user, amount);
         uint256 userDepositedBefore = collateralManager.getAmountDeposited(user);
         assertEq(userDepositedBefore, 0);
         vm.prank(user);
-        weth.approve(address(collateralManager), 10 ether);
+        weth.approve(address(collateralManager), amount);
         vm.prank(user);
-        collateralManager.deposit(10 ether);
+        collateralManager.deposit(amount);
         uint256 userDepositedAfter = collateralManager.getAmountDeposited(user);
-        assertEq(userDepositedAfter, 10 ether);
+        assertEq(userDepositedAfter, amount);
     }
 
-    function testDepositEventEmits() public {
+    function testDepositEventEmits(uint256 amount) public {
+        amount = bound(amount, 1e5, type(uint96).max);
+        weth.mint(user, amount);
         vm.prank(user);
-        weth.approve(address(collateralManager), 10 ether);
+        weth.approve(address(collateralManager), amount);
         vm.prank(user);
         vm.expectEmit();
-        emit CollateralManager.Deposit(user, 10 ether);
-        collateralManager.deposit(10 ether);
+        emit CollateralManager.Deposit(user, amount);
+        collateralManager.deposit(amount);
     }
 
-    function testDepositFail() public {
+    function testDepositFail(uint256 amount) public {
+        amount = bound(amount, 1e5, type(uint96).max);
+        weth.mint(user, amount);
         vm.startPrank(owner);
         ERC20MockFailTransferFrom mockWeth = new ERC20MockFailTransferFrom("WETH", "WETH", msg.sender, 100e8);
-        mockWeth.mint(user, USER_STARTING_WETH_BALANCE);
+        mockWeth.mint(user, amount);
         collateralManager = new CollateralManager(
             address(mockWeth),
             address(wethPriceFeed),
@@ -140,40 +150,52 @@ contract CollateralManagerTest is Test {
         vm.stopPrank();
 
         vm.prank(user);
-        mockWeth.approve(address(collateralManager), 10 ether);
+        mockWeth.approve(address(collateralManager), amount);
         vm.prank(user);
         vm.expectRevert(abi.encodeWithSelector(CollateralManager.CollateralManager__DepositFailed.selector, user));
-        collateralManager.deposit(1 ether);
+        collateralManager.deposit(amount);
     }
 
     // redeem
 
-    function testRedeemUserWethBalanceIncreases() public deposit {
+    function testRedeemUserWethBalanceIncreases() public {
+        weth.mint(user, 10 ether);
+        vm.prank(user);
+        weth.approve(address(collateralManager), 10 ether);
+        vm.prank(user);
+        collateralManager.deposit(10 ether);
+
         uint256 wethBalanceBefore = weth.balanceOf(user);
-        assertEq(wethBalanceBefore, 90 ether);
+        assertEq(wethBalanceBefore, 0);
         vm.prank(user);
         collateralManager.redeem(10 ether);
         uint256 wethBalanceAfter = weth.balanceOf(user);
-        assertEq(wethBalanceAfter, USER_STARTING_WETH_BALANCE);
+        assertEq(wethBalanceAfter, 10 ether);
     }
 
-    function testRedeemAttemptMoreThanDeposited() public deposit {
+    function testRedeemAttemptMoreThanDeposited(uint256 amount) public deposit(amount) {
         vm.prank(user);
         vm.expectRevert(CollateralManager.CollateralManager__CannotRedeemMoreThanDeposited.selector);
-        collateralManager.redeem(USER_STARTING_WETH_BALANCE + 1);
+        collateralManager.redeem(deposited + 1);
     }
 
-    function testRedeemEventEmits() public deposit {
+    function testRedeemEventEmits() public {
+        weth.mint(user, 10 ether);
+        vm.prank(user);
+        weth.approve(address(collateralManager), 10 ether);
+        vm.prank(user);
+        collateralManager.deposit(10 ether);
         vm.prank(user);
         vm.expectEmit();
         emit CollateralManager.Redeem(user, 10 ether);
         collateralManager.redeem(10 ether);
     }
 
-    function testRedeemFail() public {
+    function testRedeemFail(uint256 amount) public {
+        amount = bound(amount, 1e5, type(uint96).max);
         vm.startPrank(owner);
         ERC20MockFailTransfer mockWeth = new ERC20MockFailTransfer("WETH", "WETH", msg.sender, 100e8);
-        mockWeth.mint(user, USER_STARTING_WETH_BALANCE);
+        mockWeth.mint(user, amount);
         collateralManager = new CollateralManager(
             address(mockWeth),
             address(wethPriceFeed),
@@ -183,17 +205,22 @@ contract CollateralManagerTest is Test {
         vm.stopPrank();
 
         vm.prank(user);
-        mockWeth.approve(address(collateralManager), 10 ether);
+        mockWeth.approve(address(collateralManager), amount);
         vm.prank(user);
-        collateralManager.deposit(1 ether);
+        collateralManager.deposit(amount);
         vm.prank(user);
         vm.expectRevert(abi.encodeWithSelector(CollateralManager.CollateralManager__RedeemFailed.selector, user));
-        collateralManager.redeem(1 ether);
+        collateralManager.redeem(amount);
     }
 
     // request tokens
 
-    function testRequestTokensInsufficientBalanceRevert() public deposit {
+    function testRequestTokensInsufficientBalanceRevert() public {
+        weth.mint(user, 10 ether);
+        vm.prank(user);
+        weth.approve(address(collateralManager), 10 ether);
+        vm.prank(user);
+        collateralManager.deposit(10 ether);
         vm.prank(user);
         vm.expectRevert(CollateralManager.CollateralManager__InsufficientAmountDeposited.selector);
         collateralManager.requestTokensOnSecondChain(
@@ -214,7 +241,7 @@ contract CollateralManagerTest is Test {
 
     // insuffcient link revert
 
-    function testInsufficientLinkRevert() public deposit {
+    function testInsufficientLinkRevert(uint256 amount) public deposit(amount) {
         vm.prank(user);
         vm.expectRevert(CollateralManager.CollateralManager__InsufficientLinkBalance.selector);
         collateralManager.requestAllTokenOnSecondChain(arbSepoliaNetworkDetails.chainSelector, address(lendingManager));
@@ -222,7 +249,7 @@ contract CollateralManagerTest is Test {
 
     // invalid receiver revert
 
-    function testInvalidReceiverRevert() public deposit {
+    function testInvalidReceiverRevert(uint256 amount) public deposit(amount) {
         ccipLocalSimulatorFork.requestLinkFromFaucet(address(collateralManager), 1e21);
         vm.prank(user);
         vm.expectRevert(CollateralManager.CollateralManager__InvalidReceiver.selector);
@@ -231,7 +258,7 @@ contract CollateralManagerTest is Test {
 
     // not allowed destination chain
 
-    function testNotAllowedDestinationChainRevert() public deposit {
+    function testNotAllowedDestinationChainRevert(uint256 amount) public deposit(amount) {
         ccipLocalSimulatorFork.requestLinkFromFaucet(address(collateralManager), 1e21);
         vm.prank(owner);
         collateralManager.allowDestinationChain(arbSepoliaNetworkDetails.chainSelector, false);
@@ -249,6 +276,7 @@ contract CollateralManagerTest is Test {
     // not allowed source chain
 
     function testNotAllowedSourceChainArbSepolia() public {
+        weth.mint(user, 10 ether);
         vm.selectFork(sepoliaFork);
         vm.prank(user);
         weth.approve(address(collateralManager), 10 ether);
@@ -277,6 +305,7 @@ contract CollateralManagerTest is Test {
     // not allowed sender
 
     function testNotAllowedSenderLendingManager() public {
+        weth.mint(user, 10 ether);
         vm.selectFork(sepoliaFork);
         vm.prank(user);
         weth.approve(address(collateralManager), 10 ether);
@@ -304,10 +333,12 @@ contract CollateralManagerTest is Test {
 
     // collateral added to mapping event
 
-    function testAddCollateralEvent() public {
+    function testAddCollateralEvent(uint256 amount) public {
+        amount = bound(amount, 1e5, type(uint96).max);
+        weth.mint(user, amount);
         vm.startPrank(user);
-        ERC20Mock(weth).approve(address(collateralManager), 10 ether);
-        collateralManager.deposit(10 ether);
+        ERC20Mock(weth).approve(address(collateralManager), amount);
+        collateralManager.deposit(amount);
         vm.stopPrank();
 
         ccipLocalSimulatorFork.requestLinkFromFaucet(address(collateralManager), 1e21);
@@ -321,14 +352,16 @@ contract CollateralManagerTest is Test {
         lendingManager.requestCollateralReturn(sepoliaNetworkDetails.chainSelector, address(collateralManager));
         vm.stopPrank();
         vm.expectEmit();
-        emit CollateralManager.CollateralAddedToMapping(user, 10 ether);
+        emit CollateralManager.CollateralAddedToMapping(user, amount);
         ccipLocalSimulatorFork.switchChainAndRouteMessage(sepoliaFork);
     }
 
-    function testGetLastMessageDetailsAfterReceivingCollateralReturn() public {
+    function testGetLastMessageDetailsAfterReceivingCollateralReturn(uint256 amount) public {
+        amount = bound(amount, 1e5, type(uint96).max);
+        weth.mint(user, amount);
         vm.startPrank(user);
-        ERC20Mock(weth).approve(address(collateralManager), 10 ether);
-        collateralManager.deposit(10 ether);
+        ERC20Mock(weth).approve(address(collateralManager), amount);
+        collateralManager.deposit(amount);
         vm.stopPrank();
 
         ccipLocalSimulatorFork.requestLinkFromFaucet(address(collateralManager), 1e21);
@@ -344,11 +377,11 @@ contract CollateralManagerTest is Test {
         ccipLocalSimulatorFork.switchChainAndRouteMessage(sepoliaFork);
 
         (, bytes memory data) = collateralManager.getLastReceivedMessageDetails();
-        (address account, uint256 amount) = abi.decode(data, (address, uint256));
+        (address account, uint256 messageAmount) = abi.decode(data, (address, uint256));
 
         assertEq(account, user);
         // the data within the last message will be the raw message data from the lending manager, meaning it will be in
         // stablecoin units, without conversion
-        assertEq(amount, (10 ether) * 2000);
+        assertEq(messageAmount, (amount) * 2000);
     }
 }

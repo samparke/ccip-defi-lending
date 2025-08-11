@@ -31,7 +31,7 @@ contract CrossChainTest is Test {
     address alice = makeAddr("alice");
     address bob = makeAddr("bob");
     address owner = makeAddr("owner");
-    uint256 private constant ALICE_STARTING_WETH_BALANCE = 100 ether;
+    // uint256 private constant ALICE_STARTING_WETH_BALANCE = 100 ether;
     Register.NetworkDetails sepoliaNetworkDetails;
     Register.NetworkDetails arbSepoliaNetworkDetails;
 
@@ -48,7 +48,7 @@ contract CrossChainTest is Test {
         vm.startPrank(owner);
         weth = new ERC20Mock("WETH", "WETH", msg.sender, 100e8);
         wethPriceFeed = new MockV3Aggregator(DECIMALS, ETH_USD_PRICE);
-        weth.mint(alice, ALICE_STARTING_WETH_BALANCE);
+        // weth.mint(alice, ALICE_STARTING_WETH_BALANCE);
         collateralManager = new CollateralManager(
             address(weth),
             address(wethPriceFeed),
@@ -83,15 +83,17 @@ contract CrossChainTest is Test {
         vm.stopPrank();
     }
 
-    function testAliceInitialWethBalanceOnSepoliaFork() public view {
-        assertEq(vm.activeFork(), sepoliaFork);
-        assertEq(weth.balanceOf(alice), 100 ether);
-    }
+    // function testAliceInitialWethBalanceOnSepoliaFork() public view {
+    //     assertEq(vm.activeFork(), sepoliaFork);
+    //     assertEq(weth.balanceOf(alice), 100 ether);
+    // }
 
-    function testDepositWethOnSepoliaAndMintAllStablecoinOnArbSepolia() public {
+    function testDepositWethOnSepoliaAndMintAllStablecoinOnArbSepolia(uint256 amount) public {
+        amount = bound(amount, 1e5, type(uint96).max);
+        weth.mint(alice, amount);
         vm.startPrank(alice);
-        ERC20Mock(weth).approve(address(collateralManager), 10 ether);
-        collateralManager.deposit(10 ether);
+        ERC20Mock(weth).approve(address(collateralManager), amount);
+        collateralManager.deposit(amount);
         vm.stopPrank();
 
         ccipLocalSimulatorFork.requestLinkFromFaucet(address(collateralManager), 1e21);
@@ -107,21 +109,23 @@ contract CrossChainTest is Test {
         vm.selectFork(arbSepoliaFork);
         vm.warp(block.timestamp + 20 minutes);
         (, bytes memory data) = lendingManager.getLastReceivedMessageDetails();
-        (address user, uint256 amount) = abi.decode(data, (address, uint256));
-        console.log("last received message details:", user, amount);
+        (address user, uint256 messageAmount) = abi.decode(data, (address, uint256));
+        console.log("last received message details:", user, messageAmount);
         assertGt(stablecoin.balanceOf(alice), aliceStablecoinBalanceBefore);
     }
 
-    function testDepositWethOnSepoliaAndMintStablecoinOnArbSepolia() public {
+    function testDepositWethOnSepoliaAndMintStablecoinOnArbSepolia(uint256 amount) public {
+        amount = bound(amount, 1e5, type(uint96).max);
+        weth.mint(alice, amount);
         vm.startPrank(alice);
-        IERC20(address(weth)).approve(address(collateralManager), 10 ether);
-        collateralManager.deposit(10 ether);
+        IERC20(address(weth)).approve(address(collateralManager), amount);
+        collateralManager.deposit(amount);
         vm.stopPrank();
 
         ccipLocalSimulatorFork.requestLinkFromFaucet(address(collateralManager), 1e21);
         vm.prank(alice);
         collateralManager.requestTokensOnSecondChain(
-            arbSepoliaNetworkDetails.chainSelector, address(lendingManager), 5 ether
+            arbSepoliaNetworkDetails.chainSelector, address(lendingManager), (amount / 2)
         );
 
         vm.selectFork(arbSepoliaFork);
@@ -133,17 +137,19 @@ contract CrossChainTest is Test {
         vm.selectFork(arbSepoliaFork);
         vm.warp(block.timestamp + 20 minutes);
         (, bytes memory data) = lendingManager.getLastReceivedMessageDetails();
-        (address user, uint256 amount) = abi.decode(data, (address, uint256));
-        console.log("data received:", user, amount);
+        (address user, uint256 messageAmount) = abi.decode(data, (address, uint256));
+        console.log("data received:", user, messageAmount);
         assertGt(stablecoin.balanceOf(alice), aliceBalanceBefore);
     }
 
-    function testAliceDepositsWethAndBurnsStablecoinAndRedeemsWeth() public {
+    function testAliceDepositsWethAndBurnsStablecoinAndRedeemsWeth(uint256 amount) public {
+        amount = bound(amount, 1e5, type(uint96).max);
+        weth.mint(alice, amount);
         vm.startPrank(alice);
-        ERC20Mock(weth).approve(address(collateralManager), 10 ether);
-        collateralManager.deposit(10 ether);
+        ERC20Mock(weth).approve(address(collateralManager), amount);
+        collateralManager.deposit(amount);
         vm.stopPrank();
-        assertEq(collateralManager.getAmountDeposited(alice), 10 ether);
+        assertEq(collateralManager.getAmountDeposited(alice), amount);
         ccipLocalSimulatorFork.requestLinkFromFaucet(address(collateralManager), 1e21);
         vm.prank(alice);
         collateralManager.requestAllTokenOnSecondChain(arbSepoliaNetworkDetails.chainSelector, address(lendingManager));
@@ -167,17 +173,17 @@ contract CrossChainTest is Test {
         assertEq(stablecoin.balanceOf(alice), 0);
 
         vm.selectFork(sepoliaFork);
-        assertEq(collateralManager.getAmountDeposited(alice), 10 ether);
+        assertEq(collateralManager.getAmountDeposited(alice), amount);
 
         vm.prank(alice);
-        collateralManager.redeem(10 ether);
-        assertEq(weth.balanceOf(alice), ALICE_STARTING_WETH_BALANCE);
+        collateralManager.redeem(amount);
+        assertEq(weth.balanceOf(alice), amount);
     }
 
     function testNotAllowedSourceChainRevert() public {
         vm.prank(owner);
         collateralManager.allowSourceChain(arbSepoliaNetworkDetails.chainSelector, false);
-
+        weth.mint(alice, 10 ether);
         vm.startPrank(alice);
         ERC20Mock(weth).approve(address(collateralManager), 10 ether);
         collateralManager.deposit(10 ether);
