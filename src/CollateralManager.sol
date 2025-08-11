@@ -149,9 +149,6 @@ contract CollateralManager is CCIPReceiver, Ownable {
     }
 
     function _addToUserDepositMapping(address _account, uint256 _amountStableCoin) private {
-        if (_amountStableCoin == 0) {
-            revert CollateralManager__AddToDepositCannotBeZero();
-        }
         uint256 amountWeth = calculateWethTokenAmountFromStablecoin(_amountStableCoin);
         s_amountDeposited[_account] += amountWeth;
         emit CollateralAddedToMapping(_account, amountWeth);

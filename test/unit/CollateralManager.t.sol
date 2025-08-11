@@ -274,6 +274,34 @@ contract CollateralManagerTest is Test {
         ccipLocalSimulatorFork.switchChainAndRouteMessage(sepoliaFork);
     }
 
+    // not allowed sender
+
+    function testNotAllowedSenderLendingManager() public {
+        vm.selectFork(sepoliaFork);
+        vm.prank(user);
+        weth.approve(address(collateralManager), 10 ether);
+        vm.prank(user);
+        collateralManager.deposit(10 ether);
+
+        ccipLocalSimulatorFork.requestLinkFromFaucet(address(collateralManager), 1e21);
+        vm.prank(user);
+        collateralManager.requestAllTokenOnSecondChain(arbSepoliaNetworkDetails.chainSelector, address(lendingManager));
+        ccipLocalSimulatorFork.switchChainAndRouteMessage(arbSepoliaFork);
+
+        vm.selectFork(sepoliaFork);
+        vm.prank(owner);
+        collateralManager.allowSender(address(lendingManager), false);
+
+        vm.selectFork(arbSepoliaFork);
+        ccipLocalSimulatorFork.requestLinkFromFaucet(address(lendingManager), 1e21);
+        vm.prank(user);
+        lendingManager.burnStablecoin(1 ether);
+        vm.prank(user);
+        lendingManager.requestCollateralReturn(sepoliaNetworkDetails.chainSelector, address(collateralManager));
+        vm.expectRevert();
+        ccipLocalSimulatorFork.switchChainAndRouteMessage(sepoliaFork);
+    }
+
     // collateral added to mapping event
 
     function testAddCollateralEvent() public {
@@ -295,5 +323,32 @@ contract CollateralManagerTest is Test {
         vm.expectEmit();
         emit CollateralManager.CollateralAddedToMapping(user, 10 ether);
         ccipLocalSimulatorFork.switchChainAndRouteMessage(sepoliaFork);
+    }
+
+    function testGetLastMessageDetailsAfterReceivingCollateralReturn() public {
+        vm.startPrank(user);
+        ERC20Mock(weth).approve(address(collateralManager), 10 ether);
+        collateralManager.deposit(10 ether);
+        vm.stopPrank();
+
+        ccipLocalSimulatorFork.requestLinkFromFaucet(address(collateralManager), 1e21);
+        vm.prank(user);
+        collateralManager.requestAllTokenOnSecondChain(arbSepoliaNetworkDetails.chainSelector, address(lendingManager));
+        ccipLocalSimulatorFork.switchChainAndRouteMessage(arbSepoliaFork);
+
+        ccipLocalSimulatorFork.requestLinkFromFaucet(address(lendingManager), 1e21);
+        vm.startPrank(user);
+        lendingManager.burnStablecoin(stablecoin.balanceOf(user));
+        lendingManager.requestCollateralReturn(sepoliaNetworkDetails.chainSelector, address(collateralManager));
+        vm.stopPrank();
+        ccipLocalSimulatorFork.switchChainAndRouteMessage(sepoliaFork);
+
+        (, bytes memory data) = collateralManager.getLastReceivedMessageDetails();
+        (address account, uint256 amount) = abi.decode(data, (address, uint256));
+
+        assertEq(account, user);
+        // the data within the last message will be the raw message data from the lending manager, meaning it will be in
+        // stablecoin units, without conversion
+        assertEq(amount, (10 ether) * 2000);
     }
 }
