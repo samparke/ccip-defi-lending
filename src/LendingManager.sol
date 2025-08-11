@@ -17,7 +17,6 @@ contract LendingManager is CCIPReceiver, Ownable {
     error LendingManager__MustBeMoreThanZero();
     error LendingManager__MustBurnBeforeRequestingCollateral();
     error LendingManager__DestinationChainNotAllowListed();
-    error LendingManager__CanOnlyBurnYourOwnTokens();
 
     event MessageSent(
         bytes32 indexed messageId,
@@ -133,7 +132,7 @@ contract LendingManager is CCIPReceiver, Ownable {
      * @param _amountStablecoinBurned the amount of stablecoin the user burned, and want to be converted into collateral on other chain
      */
     function sendMessage(uint64 _destinationChainSelector, address _receiver, bytes memory _amountStablecoinBurned)
-        public
+        private
         onlyAllowListedDestinationChain(_destinationChainSelector)
         validateReceiver(_receiver)
         returns (bytes32 messageId)
@@ -169,7 +168,7 @@ contract LendingManager is CCIPReceiver, Ownable {
             message.messageId, message.sourceChainSelector, abi.decode(message.sender, (address)), message.data
         );
         (address user, uint256 amount) = abi.decode(message.data, (address, uint256));
-        i_stablecoin.mint(user, amount);
+        _mintStablecoin(user, amount);
     }
 
     /**

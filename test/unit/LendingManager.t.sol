@@ -102,23 +102,19 @@ contract LendingManagerTest is Test {
         _;
     }
 
-    // function testMintStablecoinWorksAndEmitsEvent() public {
-    //     vm.selectFork(arbSepoliaFork);
-    //     uint256 userBalanceBeforeMint = stablecoin.balanceOf(user);
-    //     assertEq(userBalanceBeforeMint, 0);
-    //     vm.expectEmit();
-    //     emit LendingManager.StablecoinMinted(user, 1 ether);
-    //     lendingManager.mintStablecoin(user, 1 ether);
-    //     uint256 userBalanceAfterAfter = stablecoin.balanceOf(user);
-    //     assertEq(userBalanceAfterAfter, 1 ether);
-    // }
+    function testStablecoinMintedEvent() public {
+        vm.prank(user);
+        weth.approve(address(collateralManager), 10 ether);
+        vm.prank(user);
+        collateralManager.deposit(10 ether);
 
-    // function testMintNeedsRoleRevert() public {
-    //     vm.selectFork(arbSepoliaFork);
-    //     vm.prank(user);
-    //     vm.expectPartialRevert(IAccessControl.AccessControlUnauthorizedAccount.selector);
-    //     lendingManager.mintStablecoin(user, 1 ether);
-    // }
+        ccipLocalSimulatorFork.requestLinkFromFaucet(address(collateralManager), 1e21);
+        vm.prank(user);
+        collateralManager.requestAllTokenOnSecondChain(arbSepoliaNetworkDetails.chainSelector, address(lendingManager));
+        // vm.expectEmit();
+        // emit LendingManager.StablecoinMinted(user, 2e22);
+        ccipLocalSimulatorFork.switchChainAndRouteMessage(arbSepoliaFork);
+    }
 
     function testBurnIncreasesUserBurnMappingAndReducesBalanceAndEmitsEvent()
         public
@@ -152,6 +148,14 @@ contract LendingManagerTest is Test {
         vm.prank(user);
         vm.expectRevert(LendingManager.LendingManager__MustBurnBeforeRequestingCollateral.selector);
         lendingManager.requestCollateralReturn(sepoliaNetworkDetails.chainSelector, address(collateralManager));
+    }
+
+    // cannot burn more than zero
+
+    function testBurnCannotBeZeroRevert() public depositOnSepoliaAndMintOnArbSepolia {
+        vm.prank(user);
+        vm.expectRevert(LendingManager.LendingManager__MustBeMoreThanZero.selector);
+        lendingManager.burnStablecoin(0);
     }
 
     // insufficent link
@@ -265,10 +269,32 @@ contract LendingManagerTest is Test {
         ccipLocalSimulatorFork.switchChainAndRouteMessage(arbSepoliaFork);
     }
 
+    // not allow source chain
+
     function testNotAllowedSourceChain() public {
         vm.selectFork(arbSepoliaFork);
         vm.prank(owner);
         lendingManager.allowSourceChain(sepoliaNetworkDetails.chainSelector, false);
+
+        vm.selectFork(sepoliaFork);
+        vm.prank(user);
+        weth.approve(address(collateralManager), 10 ether);
+        vm.prank(user);
+        collateralManager.deposit(10 ether);
+
+        ccipLocalSimulatorFork.requestLinkFromFaucet(address(collateralManager), 1e21);
+        vm.prank(user);
+        collateralManager.requestAllTokenOnSecondChain(arbSepoliaNetworkDetails.chainSelector, address(lendingManager));
+        vm.expectRevert();
+        ccipLocalSimulatorFork.switchChainAndRouteMessage(arbSepoliaFork);
+    }
+
+    // not allow sender
+
+    function testNotAllowedSenderCollateralManager() public {
+        vm.selectFork(arbSepoliaFork);
+        vm.prank(owner);
+        lendingManager.allowSender(address(collateralManager), false);
 
         vm.selectFork(sepoliaFork);
         vm.prank(user);
