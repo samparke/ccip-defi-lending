@@ -4,37 +4,30 @@ pragma solidity ^0.8.24;
 import {Script} from "forge-std/Script.sol";
 import {MockV3Aggregator} from "../test/mocks/MockV3Aggregator.sol";
 import {ERC20Mock} from "../test/mocks/ERC20Mock.sol";
+import {CCIPLocalSimulatorFork, Register} from "@chainlink-local/src/ccip/CCIPLocalSimulatorFork.sol";
 
 contract HelperConfig is Script {
     struct NetworkConfig {
         address wethAddress;
         address wethPriceFeed;
+        address router;
+        address linkToken;
     }
 
-    uint8 private constant DECIMALS = 8;
-    int256 private constant ETH_USD_PRICE = 2000e8;
     NetworkConfig public activeNetworkConfig;
 
     constructor() {
         if (block.chainid == 11155111) {
             activeNetworkConfig = getSepoliaConfig();
-        } else {
-            activeNetworkConfig = getAnvilConfig();
         }
     }
 
     function getSepoliaConfig() public pure returns (NetworkConfig memory) {
         return NetworkConfig({
-            wethAddress: 0xdd13E55209Fd76AfE204dBda4007C227904f0a81,
-            wethPriceFeed: 0x694AA1769357215DE4FAC081bf1f309aDC325306
+            wethAddress: 0x097D90c9d3E0B50Ca60e1ae45F6A81010f9FB534,
+            wethPriceFeed: 0x694AA1769357215DE4FAC081bf1f309aDC325306,
+            router: 0x0BF3dE8c5D3e8A2B34D2BEeB17ABfCeBaf363A59,
+            linkToken: 0x779877A7B0D9E8603169DdbD7836e478b4624789
         });
-    }
-
-    function getAnvilConfig() public returns (NetworkConfig memory) {
-        vm.startBroadcast();
-        ERC20Mock wethMock = new ERC20Mock("WETH", "WETH", msg.sender, 100e8);
-        MockV3Aggregator wethPriceFeed = new MockV3Aggregator(DECIMALS, ETH_USD_PRICE);
-        vm.stopBroadcast();
-        return (NetworkConfig({wethAddress: address(wethMock), wethPriceFeed: address(wethPriceFeed)}));
     }
 }

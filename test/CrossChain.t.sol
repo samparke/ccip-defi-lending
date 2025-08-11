@@ -12,6 +12,9 @@ import {CCIPLocalSimulatorFork, Register} from "@chainlink-local/src/ccip/CCIPLo
 import {Client} from "@ccip/contracts/src/v0.8/ccip/libraries/Client.sol";
 import {IRouterClient} from "@ccip/contracts/src/v0.8/ccip/interfaces/IRouterClient.sol";
 import {IERC20} from "@ccip/contracts/src/v0.8/vendor/openzeppelin-solidity/v4.8.3/contracts/token/ERC20/IERC20.sol";
+import {HelperConfig} from "../script/HelperConfig.s.sol";
+import {DeployCollateralManager} from "../script/DeployCollateralManager.s.sol";
+import {DeployStablecoinAndLendingManager} from "../script/DeployStablecoinAndLendingManager.t.sol";
 
 contract CrossChainTest is Test {
     CCIPLocalSimulatorFork ccipLocalSimulatorFork;
@@ -24,11 +27,11 @@ contract CrossChainTest is Test {
     int256 private constant ETH_USD_PRICE = 2000e8;
     uint256 sepoliaFork;
     uint256 arbSepoliaFork;
+    HelperConfig config;
     address alice = makeAddr("alice");
     address bob = makeAddr("bob");
     address owner = makeAddr("owner");
     uint256 private constant ALICE_STARTING_WETH_BALANCE = 100 ether;
-
     Register.NetworkDetails sepoliaNetworkDetails;
     Register.NetworkDetails arbSepoliaNetworkDetails;
 

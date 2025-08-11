@@ -169,6 +169,7 @@ contract LendingManager is CCIPReceiver, Ownable {
         );
         (address user, uint256 amount) = abi.decode(message.data, (address, uint256));
         _mintStablecoin(user, amount);
+        // i_stablecoin.mint(user, amount);
     }
 
     /**
