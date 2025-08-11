@@ -1,9 +1,16 @@
 ## CCIP DeFi Lending Protocol
 
-**This project involves:**
+**Overview:**
 
-- Depositing WETH on the source chain, and then minting a stablecoin on a secondary chain - in alignment with ETH's current price.
+- User deposits WETH to the Collateral Manager contract on the local chain, such as on the Ethereum Mainnet. The user then requests tokens from the Lending Manager on the destination chain, such as on Arbitrum, which then mints the user stablecoins from the Stablecoin contract. The quantity of stablecoins minted depends on ETH's current price. For example, if ETH is $2000, and a user deposits 1 ETH, they will receive 2000 stablecoins.
 
+- The owner of the contracr must, however, allow each chain and sender. For example, if the contract only permits cross-chain messaging between Ethereum Mainnet and Arbitrum, and a user attempts to bridge messaging to Avalanche, it will revert.
+
+**Notes on testing:**
+
+- To test Chainlink CCIP, I used Chainlink-Local. I created two forks: Ethereum Sepolia (where the Collateral Manager was deployed) and Arbitrum Sepolia (where the Lending Manager and Stablecoin was deployed).
+
+**100% coverage on each contract:**
 ╭------------------------------------------------+------------------+------------------+-----------------+-----------------╮
 | File | % Lines | % Statements | % Branches | % Funcs |
 +==========================================================================================================================+
